@@ -4,69 +4,129 @@ from typing import Dict, Optional, Any
 import datetime
 import logging
 
+# IMPORTANT FIX
+from app.routes.auth import get_current_user
+
 logger = logging.getLogger(__name__)
 
-# Lazy service loading to reduce import-time errors
+# ----------------------------------------------------------
+# LAZY SERVICE LOADING
+# ----------------------------------------------------------
 def get_service(name: str):
     try:
         if name == "company":
             from app.services.company_service import CompanyService
             return CompanyService
+
         elif name == "review":
             from app.services.review_service import ReviewService
             return ReviewService
+
         elif name == "insights":
             from app.services.ai_insights_service import AIInsightsService
             return AIInsightsService
+
         elif name == "revenue":
             from app.services.revenue_risk_service import RevenueRiskService
             return RevenueRiskService
+
         elif name == "chat":
             from app.services.chat_service import AIChatService
             return AIChatService
+
     except Exception as e:
         logger.error(f"Failed to import {name}_service: {e}")
-        raise HTTPException(status_code=500, detail=f"Service {name} not available")
-    raise HTTPException(status_code=500, detail="Unknown service")
 
+        raise HTTPException(
+            status_code=500,
+            detail=f"Service {name} not available"
+        )
 
-router = APIRouter(prefix="/api", tags=["dashboard"])
+    raise HTTPException(
+        status_code=500,
+        detail="Unknown service"
+    )
 
+# ----------------------------------------------------------
+# ROUTER
+# ----------------------------------------------------------
+router = APIRouter(
+    prefix="/api",
+    tags=["dashboard"]
+)
 
+# ----------------------------------------------------------
+# REQUEST MODELS
+# ----------------------------------------------------------
 class ChatRequest(BaseModel):
     message: str
 
-
+# ----------------------------------------------------------
+# GET COMPANIES
+# ----------------------------------------------------------
 @router.get("/companies")
-async def get_companies(user=Depends(get_current_user)):
+async def get_companies(
+    user=Depends(get_current_user)
+):
     try:
         CompanyService = get_service("company")
-        companies = await CompanyService.get_user_companies(user.id)
-        return {"companies": companies or []}
+
+        companies = await CompanyService.get_user_companies(
+            user.id
+        )
+
+        return {
+            "companies": companies or []
+        }
+
     except Exception as e:
         logger.exception("Error in get_companies")
-        raise HTTPException(status_code=500, detail="Failed to load companies")
 
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to load companies"
+        )
 
+# ----------------------------------------------------------
+# ADD COMPANY
+# ----------------------------------------------------------
 @router.post("/companies")
-async def add_company(payload: Dict[str, Any], user=Depends(get_current_user)):
+async def add_company(
+    payload: Dict[str, Any],
+    user=Depends(get_current_user)
+):
     if not payload.get("place_id"):
-        raise HTTPException(status_code=400, detail="place_id is required")
+        raise HTTPException(
+            status_code=400,
+            detail="place_id is required"
+        )
 
     try:
         CompanyService = get_service("company")
+
         company = await CompanyService.create_company(
             user_id=user.id,
             name=payload.get("name"),
             place_id=payload.get("place_id"),
             address=payload.get("address")
         )
-        return {"message": "Business linked successfully", "company": company}
+
+        return {
+            "message": "Business linked successfully",
+            "company": company
+        }
+
     except Exception as e:
         logger.exception("Error adding company")
-        raise HTTPException(status_code=500, detail="Failed to add business")
 
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to add business"
+        )
 
+# ----------------------------------------------------------
+# AI INSIGHTS
+# ----------------------------------------------------------
 @router.get("/dashboard/ai/insights")
 async def get_ai_insights(
     company_id: int = Query(..., gt=0),
@@ -76,19 +136,37 @@ async def get_ai_insights(
 ):
     try:
         CompanyService = get_service("company")
-        if not await CompanyService.user_owns_company(user.id, company_id):
-            raise HTTPException(status_code=403, detail="Access denied")
+
+        if not await CompanyService.user_owns_company(
+            user.id,
+            company_id
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail="Access denied"
+            )
 
         InsightsService = get_service("insights")
+
         insights = await InsightsService.generate_insights(
-            company_id=company_id, start_date=start, end_date=end
+            company_id=company_id,
+            start_date=start,
+            end_date=end
         )
+
         return insights
+
     except Exception as e:
         logger.exception("Insights failed")
-        raise HTTPException(status_code=500, detail="Failed to generate insights")
 
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to generate insights"
+        )
 
+# ----------------------------------------------------------
+# LATEST REVIEWS
+# ----------------------------------------------------------
 @router.get("/dashboard/latest-reviews")
 async def get_latest_reviews(
     company_id: int = Query(...),
@@ -97,49 +175,112 @@ async def get_latest_reviews(
 ):
     try:
         CompanyService = get_service("company")
-        if not await CompanyService.user_owns_company(user.id, company_id):
-            raise HTTPException(status_code=403, detail="Access denied")
+
+        if not await CompanyService.user_owns_company(
+            user.id,
+            company_id
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail="Access denied"
+            )
 
         ReviewService = get_service("review")
-        reviews = await ReviewService.get_latest_reviews(company_id, limit)
+
+        reviews = await ReviewService.get_latest_reviews(
+            company_id,
+            limit
+        )
+
         return reviews
+
     except Exception as e:
         logger.exception("Latest reviews failed")
-        raise HTTPException(status_code=500, detail="Failed to load reviews")
 
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to load reviews"
+        )
 
+# ----------------------------------------------------------
+# REVENUE RISK
+# ----------------------------------------------------------
 @router.get("/dashboard/revenue")
-async def get_revenue_risk(company_id: int = Query(...), user=Depends(get_current_user)):
+async def get_revenue_risk(
+    company_id: int = Query(...),
+    user=Depends(get_current_user)
+):
     try:
         CompanyService = get_service("company")
-        if not await CompanyService.user_owns_company(user.id, company_id):
-            raise HTTPException(status_code=403, detail="Access denied")
+
+        if not await CompanyService.user_owns_company(
+            user.id,
+            company_id
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail="Access denied"
+            )
 
         RevenueService = get_service("revenue")
-        return await RevenueService.calculate_risk(company_id)
+
+        return await RevenueService.calculate_risk(
+            company_id
+        )
+
     except Exception as e:
         logger.exception("Revenue risk failed")
-        raise HTTPException(status_code=500, detail="Failed to calculate risk")
 
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to calculate risk"
+        )
 
+# ----------------------------------------------------------
+# SYNC LIVE REVIEWS
+# ----------------------------------------------------------
 @router.post("/reviews/ingest/{company_id}")
-async def sync_live_reviews(company_id: int, user=Depends(get_current_user)):
+async def sync_live_reviews(
+    company_id: int,
+    user=Depends(get_current_user)
+):
     try:
         CompanyService = get_service("company")
-        if not await CompanyService.user_owns_company(user.id, company_id):
-            raise HTTPException(status_code=403, detail="Access denied")
+
+        if not await CompanyService.user_owns_company(
+            user.id,
+            company_id
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail="Access denied"
+            )
 
         ReviewService = get_service("review")
-        result = await ReviewService.ingest_from_google(company_id)
+
+        result = await ReviewService.ingest_from_google(
+            company_id
+        )
+
         return {
             "message": "Sync completed",
-            "reviews_count": result.get("ingested_count", 0)
+            "reviews_count": result.get(
+                "ingested_count",
+                0
+            )
         }
+
     except Exception as e:
         logger.exception("Sync failed")
-        raise HTTPException(status_code=500, detail="Sync failed")
 
+        raise HTTPException(
+            status_code=500,
+            detail="Sync failed"
+        )
 
+# ----------------------------------------------------------
+# AI CHAT
+# ----------------------------------------------------------
 @router.post("/dashboard/chat")
 async def ai_chat(
     company_id: int = Query(...),
@@ -148,17 +289,42 @@ async def ai_chat(
 ):
     try:
         CompanyService = get_service("company")
-        if not await CompanyService.user_owns_company(user.id, company_id):
-            raise HTTPException(status_code=403, detail="Access denied")
+
+        if not await CompanyService.user_owns_company(
+            user.id,
+            company_id
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail="Access denied"
+            )
 
         ChatService = get_service("chat")
-        answer = await ChatService.get_response(company_id, request.message)
-        return {"answer": answer}
+
+        answer = await ChatService.get_response(
+            company_id,
+            request.message
+        )
+
+        return {
+            "answer": answer
+        }
+
     except Exception as e:
         logger.exception("Chat failed")
-        raise HTTPException(status_code=500, detail="AI chat unavailable")
 
+        raise HTTPException(
+            status_code=500,
+            detail="AI chat unavailable"
+        )
 
+# ----------------------------------------------------------
+# LOGOUT
+# ----------------------------------------------------------
 @router.get("/auth/logout")
-async def logout(user=Depends(get_current_user)):
-    return {"message": "Logged out"}
+async def logout(
+    user=Depends(get_current_user)
+):
+    return {
+        "message": "Logged out"
+    }
