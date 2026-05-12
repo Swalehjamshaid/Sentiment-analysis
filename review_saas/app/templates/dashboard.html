@@ -725,20 +725,121 @@ document.getElementById('loadBtn').onclick = () => {
 
 // SYNC BUTTON
 
+<script>
+
 document.getElementById('syncBtn').onclick = async () => {
 
-    const btn = document.getElementById('syncBtn');
+    try {
 
-    btn.innerHTML = '<span class="loading-spinner"></span> Syncing';
+        const companyId =
+            document.getElementById(
+                'companySelect'
+            ).value;
 
-    setTimeout(() => {
+        if (!companyId) {
 
-        btn.innerHTML = '<i class="bi bi-check-circle me-2"></i> Sync Complete';
+            alert(
+                'Please select a company'
+            );
 
-        triggerAllLoads();
+            return;
+        }
 
-    }, 2500);
+        const btn =
+            document.getElementById(
+                'syncBtn'
+            );
+
+        btn.disabled = true;
+
+        btn.innerHTML = `
+            <span class="spinner-border spinner-border-sm me-2"></span>
+            Syncing Reviews...
+        `;
+
+        console.log(
+            '🚀 Starting synchronization'
+        );
+
+        // ==========================================
+        // CALL API
+        // ==========================================
+
+        const response = await fetch(
+
+            `/api/reviews/ingest/${companyId}`,
+
+            {
+                method: 'POST',
+
+                headers: {
+                    'Content-Type':
+                        'application/json'
+                }
+            }
+        );
+
+        const data =
+            await response.json();
+
+        console.log(data);
+
+        if (!response.ok) {
+
+            throw new Error(
+                data.detail ||
+                'Sync failed'
+            );
+        }
+
+        // ==========================================
+        // SUCCESS
+        // ==========================================
+
+        btn.innerHTML = `
+            <i class="bi bi-check-circle me-2"></i>
+            Sync Complete
+        `;
+
+        alert(
+            `✅ Reviews Added: ${data.reviews_collected}`
+        );
+
+        // ==========================================
+        // RELOAD PAGE
+        // ==========================================
+
+        setTimeout(() => {
+
+            location.reload();
+
+        }, 1000);
+
+    } catch (error) {
+
+        console.error(error);
+
+        alert(
+            '❌ ' + error.message
+        );
+
+        document.getElementById(
+            'syncBtn'
+        ).innerHTML = `
+            <i class="bi bi-arrow-repeat me-2"></i>
+            Sync Reviews
+        `;
+    }
+
+    finally {
+
+        document.getElementById(
+            'syncBtn'
+        ).disabled = false;
+    }
 };
+
+</script>
 
 // INITIALIZE
 
