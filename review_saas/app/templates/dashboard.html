@@ -1,744 +1,331 @@
-<!DOCTYPE html>
-
-<html lang="en" data-theme="light">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Review Intelligence AI Dashboard</title>
-
-```
-<!-- Bootstrap -->
-<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-
-<!-- Bootstrap Icons -->
-<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
-
-<!-- DataTables -->
-<link href="https://cdn.datatables.net/1.13.6/css/dataTables.bootstrap5.min.css" rel="stylesheet">
-
-<!-- jQuery -->
-<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
-
-<!-- Chart.js -->
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-
-<!-- DataTables -->
-<script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
-<script src="https://cdn.datatables.net/1.13.6/js/dataTables.bootstrap5.min.js"></script>
-
-<style>
-
-    :root {
-        --primary-grad: linear-gradient(135deg,#6366f1 0%,#4338ca 100%);
-        --ai-grad: linear-gradient(135deg,#a855f7 0%,#6366f1 100%);
-        --danger-grad: linear-gradient(135deg,#ef4444 0%,#b91c1c 100%);
-    }
-
-    body {
-        background: #f8fafc;
-        padding: 24px;
-        font-family: Inter, sans-serif;
-    }
-
-    .navbar {
-        background: var(--primary-grad) !important;
-        border-radius: 16px;
-        margin-bottom: 25px;
-    }
-
-    .card {
-        border: none;
-        border-radius: 20px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.05);
-    }
-
-    .total-review-card {
-        background: var(--primary-grad);
-        color: white;
-    }
-
-    .risk-card {
-        background: var(--danger-grad);
-        color: white;
-    }
-
-    .ai-badge {
-        background: var(--ai-grad);
-        color: white;
-        padding: 5px 15px;
-        border-radius: 10px;
-        font-size: 12px;
-        font-weight: bold;
-        margin-bottom: 10px;
-        display: inline-block;
-    }
-
-    #chatWindow {
-        height: 350px;
-        overflow-y: auto;
-        background: #f1f5f9;
-        border-radius: 15px;
-        padding: 20px;
-        border: 1px solid #e2e8f0;
-        display: flex;
-        flex-direction: column;
-    }
-
-    .chat-msg {
-        margin-bottom: 15px;
-        padding: 10px 15px;
-        border-radius: 15px;
-        max-width: 85%;
-    }
-
-    .chat-ai {
-        background: white;
-        align-self: flex-start;
-    }
-
-    .chat-user {
-        background: #6366f1;
-        color: white;
-        align-self: flex-end;
-    }
-
-    .chart-wrapper {
-        height: 280px;
-        position: relative;
-    }
-
-    .btn-pill {
-        border-radius: 50px;
-        padding: 10px 25px;
-        font-weight: 600;
-    }
-
-    .review-text {
-        max-width: 450px;
-        white-space: normal;
-        word-break: break-word;
-    }
-
-    .loading-spinner {
-        display: inline-block;
-        width: 18px;
-        height: 18px;
-        border: 3px solid rgba(255,255,255,.3);
-        border-radius: 50%;
-        border-top-color: white;
-        animation: spin 1s ease-in-out infinite;
-    }
-
-    @keyframes spin {
-        to {
-            transform: rotate(360deg);
-        }
-    }
-
-</style>
-```
-
-</head>
-<body>
-
-<nav class="navbar navbar-expand-lg navbar-dark p-3 shadow-lg">
-    <div class="container-fluid">
-        <span class="navbar-brand fw-bold fs-4">
-            <i class="bi bi-robot me-2"></i>
-            Review Intel AI
-        </span>
-
-```
-    <div class="d-flex gap-2">
-
-        <button class="btn btn-success btn-sm rounded-pill px-4 fw-bold"
-                data-bs-toggle="modal"
-                data-bs-target="#addCompanyModal">
-            <i class="bi bi-plus-circle me-1"></i>
-            Add Business
-        </button>
-
-        <button id="toggleTheme"
-                class="btn btn-light btn-sm rounded-pill px-3">
-            Theme
-        </button>
-
-    </div>
-</div>
-```
-
-</nav>
-
-<div class="container-fluid">
-
-```
-<div class="row g-3 align-items-end mb-4 p-4 bg-white rounded-4 shadow-sm">
-
-    <div class="col-md-3">
-        <label class="form-label fw-bold text-muted small">ACTIVE ENTITY</label>
-        <select id="companySelect" class="form-select"></select>
-    </div>
-
-    <div class="col-md-2">
-        <label class="form-label fw-bold text-muted small">START DATE</label>
-        <input id="startDate" type="date" class="form-control">
-    </div>
-
-    <div class="col-md-2">
-        <label class="form-label fw-bold text-muted small">END DATE</label>
-        <input id="endDate" type="date" class="form-control">
-    </div>
-
-    <div class="col-md-5">
-        <div class="d-flex gap-2">
-
-            <button id="loadBtn"
-                    onclick="triggerAllLoads()"
-                    class="btn btn-primary w-50 btn-pill">
-                Analyze Business
-            </button>
-
-            <button id="syncBtn"
-                    class="btn btn-success w-50 btn-pill">
-                Sync Live Data
-            </button>
-
-        </div>
-    </div>
-</div>
-
-<div class="row g-3 mb-4 text-center">
-
-    <div class="col-md-3">
-        <div class="card total-review-card p-4 h-100">
-            <div class="small text-uppercase">Total Reviews</div>
-            <div id="kpiTotal" class="display-4 fw-bold">0</div>
-        </div>
-    </div>
-
-    <div class="col-md-3">
-        <div class="card p-4 h-100">
-            <div class="small text-muted">AVG RATING</div>
-            <div id="kpiRating" class="display-4 fw-bold text-primary">—</div>
-        </div>
-    </div>
-
-    <div class="col-md-6">
-        <div class="card risk-card p-4 h-100">
-            <div class="small text-uppercase">Revenue Risk</div>
-            <div class="d-flex justify-content-around mt-3">
-                <div>
-                    <small>Loss Probability</small>
-                    <div id="riskPct" class="h2 fw-bold">—</div>
-                </div>
-                <div>
-                    <small>Impact</small>
-                    <div id="riskImpact" class="h2 fw-bold">—</div>
-                </div>
-                <div>
-                    <small>Reputation</small>
-                    <div id="riskSentiment" class="h2 fw-bold">—</div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-</div>
-
-<div class="row g-4 mb-4">
-
-    <div class="col-lg-8">
-
-        <div class="row g-4">
-
-            <div class="col-md-6">
-                <div class="ai-badge">EMOTION RADAR</div>
-                <div class="card p-3">
-                    <div class="chart-wrapper">
-                        <canvas id="chartEmotions"></canvas>
-                    </div>
-                </div>
-            </div>
-
-            <div class="col-md-6">
-                <div class="ai-badge">SENTIMENT TREND</div>
-                <div class="card p-3">
-                    <div class="chart-wrapper">
-                        <canvas id="chartMonthly"></canvas>
-                    </div>
-                </div>
-            </div>
-
-            <div class="col-12">
-                <div class="ai-badge">RATING DISTRIBUTION</div>
-                <div class="card p-3">
-                    <div class="chart-wrapper">
-                        <canvas id="chartRatings"></canvas>
-                    </div>
-                </div>
-            </div>
-
-        </div>
-
-    </div>
-
-    <div class="col-lg-4">
-
-        <div class="ai-badge">AI CHAT</div>
-
-        <div class="card h-100">
-            <div class="card-body d-flex flex-column">
-
-                <div id="chatWindow" class="mb-3">
-                    <div class="chat-msg chat-ai">
-                        Dashboard connected.
-                    </div>
-                </div>
-
-                <div class="input-group mt-auto">
-                    <input type="text"
-                           id="chatInput"
-                           class="form-control"
-                           placeholder="Ask AI...">
-
-                    <button id="chatBtn" class="btn btn-primary">
-                        <i class="bi bi-send"></i>
-                    </button>
-                </div>
-
-            </div>
-        </div>
-
-    </div>
-
-</div>
-
-<div class="card p-3 shadow-sm">
-
-    <div class="ai-badge">LATEST REVIEWS</div>
-
-    <table id="reviewsTable" class="table table-hover align-middle">
-        <thead>
-            <tr>
-                <th>Rating</th>
-                <th>Sentiment</th>
-                <th>Review</th>
-                <th>Date</th>
-                <th>Source</th>
-            </tr>
-        </thead>
-
-        <tbody id="reviewsTbody">
-            <tr>
-                <td colspan="5" class="text-center py-4">
-                    No reviews loaded
-                </td>
-            </tr>
-        </tbody>
-    </table>
-
-</div>
-```
-
-</div>
-
-<!-- ADD BUSINESS MODAL -->
-
-<div class="modal fade" id="addCompanyModal" tabindex="-1">
-
-```
-<div class="modal-dialog modal-lg modal-dialog-centered">
-
-    <form id="addCompanyForm" class="modal-content border-0 shadow-lg">
-
-        <div class="modal-header bg-success text-white">
-            <h5 class="modal-title">Add Business</h5>
-            <button type="button"
-                    class="btn-close btn-close-white"
-                    data-bs-dismiss="modal"></button>
-        </div>
-
-        <div class="modal-body p-4">
-
-            <input id="googleSearchInput"
-                   class="form-control form-control-lg mb-4"
-                   placeholder="Search Google Maps...">
-
-            <div class="bg-light p-4 rounded-4">
-
-                <div class="mb-3">
-                    <label>Business Name</label>
-                    <input id="companyName"
-                           class="form-control"
-                           readonly>
-                </div>
-
-                <div class="mb-3">
-                    <label>Google Place ID</label>
-                    <input id="placeId"
-                           class="form-control"
-                           readonly>
-                </div>
-
-                <div class="mb-3">
-                    <label>Address</label>
-                    <input id="companyAddress"
-                           class="form-control"
-                           readonly>
-                </div>
-
-            </div>
-
-        </div>
-
-        <div class="modal-footer border-0">
-
-            <button type="submit"
-                    class="btn btn-success w-100 rounded-pill fw-bold py-3">
-                Save Business
-            </button>
-
-        </div>
-
-    </form>
-
-</div>
-```
-
-</div>
+<!-- ===================================================== -->
+<!-- COMPLETE GOOGLE AUTOCOMPLETE WORKING VERSION -->
+<!-- PASTE THIS BEFORE </body> -->
+<!-- ===================================================== -->
 
 <!-- GOOGLE MAPS -->
 
 <script>
-window.GOOGLE_MAPS_API_KEY = "{{ google_maps_api_key }}";
+
+window.initGoogleAutocomplete = function () {
+
+    console.log("🚀 Google Autocomplete Starting");
+
+    // =====================================================
+    // INPUT FIELD
+    // =====================================================
+
+    const input =
+        document.getElementById("googleSearchInput");
+
+    if (!input) {
+
+        console.error("❌ googleSearchInput not found");
+
+        return;
+    }
+
+    // =====================================================
+    // VERIFY GOOGLE API
+    // =====================================================
+
+    if (
+        typeof google === "undefined" ||
+        !google.maps ||
+        !google.maps.places
+    ) {
+
+        console.error("❌ Google Places API failed to load");
+
+        return;
+    }
+
+    // =====================================================
+    // CREATE AUTOCOMPLETE
+    // =====================================================
+
+    const autocomplete =
+        new google.maps.places.Autocomplete(
+            input,
+            {
+
+                types: ['establishment'],
+
+                fields: [
+                    'place_id',
+                    'name',
+                    'formatted_address'
+                ]
+            }
+        );
+
+    console.log("✅ Autocomplete Object Created");
+
+    // =====================================================
+    // ON PLACE SELECT
+    // =====================================================
+
+    autocomplete.addListener('place_changed', function () {
+
+        const place = autocomplete.getPlace();
+
+        console.log("📍 Selected Place:", place);
+
+        // =================================================
+        // VALIDATION
+        // =================================================
+
+        if (!place || !place.place_id) {
+
+            alert("❌ Invalid Place Selected");
+
+            return;
+        }
+
+        // =================================================
+        // AUTO FILL INPUTS
+        // =================================================
+
+        const companyName =
+            document.getElementById("companyName");
+
+        const placeId =
+            document.getElementById("placeId");
+
+        const address =
+            document.getElementById("companyAddress");
+
+        if (companyName) {
+            companyName.value =
+                place.name || '';
+        }
+
+        if (placeId) {
+            placeId.value =
+                place.place_id || '';
+        }
+
+        if (address) {
+            address.value =
+                place.formatted_address || '';
+        }
+
+        console.log("✅ Google Autofill Success");
+    });
+
+    console.log("✅ Google Places Ready");
+};
+
 </script>
+
+<!-- ===================================================== -->
+<!-- GOOGLE MAPS SCRIPT -->
+<!-- ===================================================== -->
 
 <script async defer
 src="https://maps.googleapis.com/maps/api/js?key={{ google_maps_api_key }}&libraries=places&callback=initGoogleAutocomplete">
 </script>
 
-<!-- BOOTSTRAP -->
-
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<!-- ===================================================== -->
+<!-- DEBUG CHECK -->
+<!-- ===================================================== -->
 
 <script>
 
-let chartInstances = {};
-let reviewsDataTable = null;
+document.addEventListener("DOMContentLoaded", () => {
 
-function escapeHtml(str) {
+    console.log("🚀 Dashboard Loaded");
 
-    if (!str) return '';
+    // Verify inputs exist
+    console.log(
+        "Search Input:",
+        document.getElementById("googleSearchInput")
+    );
 
-    return str.replace(/[&<>]/g, m => ({
-        '&': '&amp;',
-        '<': '&lt;',
-        '>': '&gt;'
-    }[m]));
-}
+    console.log(
+        "Company Name:",
+        document.getElementById("companyName")
+    );
 
-async function loadCompanies() {
+    console.log(
+        "Place ID:",
+        document.getElementById("placeId")
+    );
 
-    try {
+    console.log(
+        "Address:",
+        document.getElementById("companyAddress")
+    );
+});
 
-        const res = await fetch('/api/companies');
+</script>
 
-        const data = await res.json();
+<!-- ===================================================== -->
+<!-- ADD BUSINESS MODAL -->
+<!-- ===================================================== -->
 
-        const companies = Array.isArray(data)
-            ? data
-            : (data.companies || []);
+<div class="modal fade"
+     id="addCompanyModal"
+     tabindex="-1">
 
-        const select = document.getElementById('companySelect');
+    <div class="modal-dialog modal-lg modal-dialog-centered">
 
-        select.innerHTML = companies.map(c => `
-            <option value="${c.id}">
-                ${escapeHtml(c.name || c.business_name)}
-            </option>
-        `).join('');
+        <form id="addCompanyForm"
+              class="modal-content border-0 shadow-lg">
 
-        if (companies.length > 0) {
-            setTimeout(() => triggerAllLoads(), 500);
-        }
+            <div class="modal-header bg-success text-white">
 
-    } catch (e) {
+                <h5 class="modal-title">
 
-        console.error(e);
-    }
-}
+                    Add Business
 
-function renderCharts(vis) {
+                </h5>
 
-    const radarCtx = document.getElementById('chartEmotions');
+                <button type="button"
+                        class="btn-close btn-close-white"
+                        data-bs-dismiss="modal"></button>
 
-    if (chartInstances.emotions) {
-        chartInstances.emotions.destroy();
-    }
+            </div>
 
-    chartInstances.emotions = new Chart(radarCtx, {
+            <div class="modal-body p-4">
 
-        type: 'radar',
+                <!-- SEARCH -->
 
-        data: {
+                <input id="googleSearchInput"
+                       class="form-control form-control-lg mb-4"
+                       placeholder="Search Google Maps...">
 
-            labels: Object.keys(vis.emotions || {}),
+                <!-- RESULTS -->
 
-            datasets: [{
+                <div class="bg-light p-4 rounded-4">
 
-                label: 'Emotion Score',
+                    <div class="mb-3">
 
-                data: Object.values(vis.emotions || {}),
+                        <label class="form-label">
 
-                backgroundColor: 'rgba(168,85,247,0.2)',
+                            Business Name
 
-                borderColor: '#a855f7',
+                        </label>
 
-                borderWidth: 2
-            }]
-        }
-    });
+                        <input id="companyName"
+                               class="form-control"
+                               readonly>
 
-    const lineCtx = document.getElementById('chartMonthly');
+                    </div>
 
-    if (chartInstances.monthly) {
-        chartInstances.monthly.destroy();
-    }
+                    <div class="mb-3">
 
-    chartInstances.monthly = new Chart(lineCtx, {
+                        <label class="form-label">
 
-        type: 'line',
+                            Google Place ID
 
-        data: {
+                        </label>
 
-            labels: (vis.sentiment_trend || []).map(x => x.week || x.month),
+                        <input id="placeId"
+                               class="form-control"
+                               readonly>
 
-            datasets: [{
+                    </div>
 
-                label: 'Sentiment',
+                    <div class="mb-3">
 
-                data: (vis.sentiment_trend || []).map(x => x.avg || 0),
+                        <label class="form-label">
 
-                borderColor: '#10b981',
+                            Address
 
-                fill: true
-            }]
-        }
-    });
+                        </label>
 
-    const barCtx = document.getElementById('chartRatings');
+                        <input id="companyAddress"
+                               class="form-control"
+                               readonly>
 
-    if (chartInstances.ratings) {
-        chartInstances.ratings.destroy();
-    }
+                    </div>
 
-    const ratings = vis.ratings || {};
+                </div>
 
-    chartInstances.ratings = new Chart(barCtx, {
+            </div>
 
-        type: 'bar',
+            <div class="modal-footer border-0">
 
-        data: {
+                <button type="submit"
+                        class="btn btn-success w-100 rounded-pill fw-bold py-3">
 
-            labels: ['1★','2★','3★','4★','5★'],
+                    Save Business
 
-            datasets: [{
+                </button>
 
-                label: 'Reviews',
+            </div>
 
-                data: [
-                    ratings['1'] || 0,
-                    ratings['2'] || 0,
-                    ratings['3'] || 0,
-                    ratings['4'] || 0,
-                    ratings['5'] || 0
-                ],
+        </form>
 
-                backgroundColor: '#6366f1'
-            }]
-        }
-    });
-}
+    </div>
 
-async function loadLatestReviews(companyId) {
+</div>
 
-    const res = await fetch(`/api/dashboard/latest-reviews?company_id=${companyId}&limit=100`);
+<!-- ===================================================== -->
+<!-- SAVE BUSINESS -->
+<!-- ===================================================== -->
 
-    const reviews = await res.json();
+<script>
 
-    const tbody = document.getElementById('reviewsTbody');
-
-    if (!reviews || reviews.length === 0) {
-
-        tbody.innerHTML = `
-            <tr>
-                <td colspan="5" class="text-center py-4">
-                    No reviews found
-                </td>
-            </tr>
-        `;
-
-        return;
-    }
-
-    tbody.innerHTML = reviews.map(r => `
-
-        <tr>
-
-            <td>${'★'.repeat(r.rating || 0)}</td>
-
-            <td>${r.sentiment || 'neutral'}</td>
-
-            <td class="review-text">
-                ${escapeHtml(r.review_text || 'No content')}
-            </td>
-
-            <td>${(r.review_date || '').split('T')[0]}</td>
-
-            <td>Google</td>
-
-        </tr>
-
-    `).join('');
-
-    if (reviewsDataTable) {
-        reviewsDataTable.destroy();
-    }
-
-    reviewsDataTable = $('#reviewsTable').DataTable({
-        pageLength: 10
-    });
-}
-
-async function triggerAllLoads() {
-
-    const cid = document.getElementById('companySelect').value;
-
-    if (!cid) return;
-
-    try {
-
-        const res = await fetch(`/api/dashboard/ai/insights?company_id=${cid}`);
-
-        const data = await res.json();
-
-        document.getElementById('kpiTotal').innerText = data.metadata?.total_reviews || 0;
-
-        document.getElementById('kpiRating').innerText = data.kpis?.average_rating?.toFixed(1) || '—';
-
-        document.getElementById('riskSentiment').innerText = (data.kpis?.reputation_score || 0) + '%';
-
-        renderCharts(data.visualizations || {});
-
-        await loadLatestReviews(cid);
-
-    } catch (e) {
-
-        console.error(e);
-    }
-}
-
-document.getElementById('syncBtn').onclick = async () => {
-
-    const cid = document.getElementById('companySelect').value;
-
-    if (!cid) return;
-
-    try {
-
-        const res = await fetch(`/api/reviews/ingest/${cid}`, {
-            method: 'POST'
-        });
-
-        const result = await res.json();
-
-        alert(`Sync complete: ${result.reviews_count || 0}`);
-
-        triggerAllLoads();
-
-    } catch (e) {
-
-        console.error(e);
-    }
-};
-
-document.getElementById('addCompanyForm').onsubmit = async (e) => {
+document.getElementById('addCompanyForm').onsubmit =
+async (e) => {
 
     e.preventDefault();
 
     const payload = {
 
-        name: document.getElementById('companyName').value,
+        name:
+            document.getElementById('companyName').value,
 
-        place_id: document.getElementById('placeId').value,
+        place_id:
+            document.getElementById('placeId').value,
 
-        address: document.getElementById('companyAddress').value
+        address:
+            document.getElementById('companyAddress').value
     };
 
-    const res = await fetch('/api/companies', {
+    if (!payload.place_id) {
 
-        method: 'POST',
+        alert("Please select a business");
 
-        headers: {
-            'Content-Type': 'application/json'
-        },
+        return;
+    }
 
-        body: JSON.stringify(payload)
-    });
+    try {
 
-    if (res.ok) {
+        const res = await fetch('/api/companies', {
 
-        alert('Business added successfully');
+            method: 'POST',
 
-        location.reload();
+            headers: {
+                'Content-Type': 'application/json'
+            },
+
+            body: JSON.stringify(payload)
+        });
+
+        if (res.ok) {
+
+            alert("✅ Business Added Successfully");
+
+            location.reload();
+
+        } else {
+
+            const error = await res.json();
+
+            alert(
+                error.detail || "Failed to save"
+            );
+        }
+
+    } catch (e) {
+
+        console.error("❌ Save failed:", e);
+
+        alert("Network error");
     }
 };
 
-function initGoogleAutocomplete() {
-
-    const input = document.getElementById('googleSearchInput');
-
-    if (!input) return;
-
-    const autocomplete = new google.maps.places.Autocomplete(input, {
-
-        fields: [
-            'place_id',
-            'name',
-            'formatted_address'
-        ],
-
-        types: ['establishment']
-    });
-
-    autocomplete.addListener('place_changed', () => {
-
-        const place = autocomplete.getPlace();
-
-        if (!place || !place.place_id) return;
-
-        document.getElementById('companyName').value = place.name || '';
-
-        document.getElementById('placeId').value = place.place_id || '';
-
-        document.getElementById('companyAddress').value = place.formatted_address || '';
-    });
-}
-
-document.getElementById('toggleTheme').onclick = () => {
-
-    const current = document.documentElement.getAttribute('data-theme');
-
-    const target = current === 'light' ? 'dark' : 'light';
-
-    document.documentElement.setAttribute('data-theme', target);
-};
-
-document.addEventListener('DOMContentLoaded', () => {
-
-    loadCompanies();
-});
-
 </script>
-
-</body>
-</html>
