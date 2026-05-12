@@ -455,87 +455,113 @@
 <script>
 
 let autocomplete;
+<script>
 
-function initGoogleAutocomplete() {
+let autocompleteInitialized = false;
 
-    console.log("🚀 Google Places Initializing...");
+function initializeGoogleAutocomplete() {
 
-    const input =
-        document.getElementById("googleSearchInput");
+    try {
 
-    if (!input) {
+        const input =
+            document.getElementById(
+                "googleSearchInput"
+            );
 
-        console.error("❌ Input field not found");
+        if (!input) {
 
-        return;
-    }
+            console.error(
+                "❌ Input field missing"
+            );
 
-    if (
-        typeof google === "undefined" ||
-        !google.maps ||
-        !google.maps.places
-    ) {
+            return;
+        }
 
-        console.error("❌ Google Places library missing");
+        if (
+            typeof google === "undefined" ||
+            !google.maps ||
+            !google.maps.places
+        ) {
 
-        return;
-    }
+            console.error(
+                "❌ Google Places API not loaded"
+            );
 
-    autocomplete =
-        new google.maps.places.Autocomplete(
-            input,
-            {
-                types: ["establishment"],
-                fields: [
-                    "place_id",
-                    "name",
-                    "formatted_address"
-                ]
+            return;
+        }
+
+        const autocomplete =
+            new google.maps.places.Autocomplete(
+                input,
+                {
+                    types: ["establishment"],
+                    fields: [
+                        "name",
+                        "place_id",
+                        "formatted_address"
+                    ]
+                }
+            );
+
+        autocomplete.addListener(
+            "place_changed",
+            () => {
+
+                const place =
+                    autocomplete.getPlace();
+
+                console.log(
+                    "📍 Selected Place:",
+                    place
+                );
+
+                document.getElementById(
+                    "companyName"
+                ).value =
+                    place.name || "";
+
+                document.getElementById(
+                    "placeId"
+                ).value =
+                    place.place_id || "";
+
+                document.getElementById(
+                    "companyAddress"
+                ).value =
+                    place.formatted_address || "";
             }
         );
 
-    autocomplete.addListener(
-        "place_changed",
-        onPlaceChanged
-    );
+        console.log(
+            "✅ Google Autocomplete Ready"
+        );
 
-    console.log("✅ Google Places Ready");
-}
+    } catch (err) {
 
-function onPlaceChanged() {
-
-    const place = autocomplete.getPlace();
-
-    console.log("📍 Place Selected:", place);
-
-    if (!place || !place.place_id) {
-
-        alert("Invalid Google Place");
-
-        return;
+        console.error(
+            "❌ Autocomplete Error:",
+            err
+        );
     }
-
-    document.getElementById("companyName").value =
-        place.name || "";
-
-    document.getElementById("placeId").value =
-        place.place_id || "";
-
-    document.getElementById("companyAddress").value =
-        place.formatted_address || "";
-
-    console.log("✅ Autofill Completed");
 }
 
-window.initGoogleAutocomplete =
-    initGoogleAutocomplete;
+window.initializeGoogleAutocomplete =
+    initializeGoogleAutocomplete;
+
+window.onload = () => {
+
+    setTimeout(() => {
+
+        initializeGoogleAutocomplete();
+
+    }, 1000);
+};
 
 </script>
 
 <script async defer
-src="https://maps.googleapis.com/maps/api/js?key={{ google_maps_api_key }}&libraries=places&callback=initGoogleAutocomplete">
+src="https://maps.googleapis.com/maps/api/js?key={{ google_maps_api_key }}&libraries=places&callback=initializeGoogleAutocomplete">
 </script>
-<script>
 
 let chartInstances = {};
 
