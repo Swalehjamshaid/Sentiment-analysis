@@ -448,59 +448,93 @@
 <script src="https://cdn.datatables.net/1.13.8/js/dataTables.bootstrap5.min.js"></script>
 
 <!-- GOOGLE MAPS -->
+<!-- ===================================================== -->
+<!-- GOOGLE PLACES AUTOCOMPLETE -->
+<!-- ===================================================== -->
 
 <script>
 
-window.initGoogleAutocomplete = function () {
+let autocomplete;
 
-    console.log('Google Autocomplete Starting');
+function initGoogleAutocomplete() {
 
-    const input = document.getElementById('googleSearchInput');
+    console.log("🚀 Google Places Initializing...");
+
+    const input =
+        document.getElementById("googleSearchInput");
 
     if (!input) {
-        console.error('Input not found');
+
+        console.error("❌ Input field not found");
+
         return;
     }
 
     if (
-        typeof google === 'undefined' ||
+        typeof google === "undefined" ||
         !google.maps ||
         !google.maps.places
     ) {
-        console.error('Google Places API failed');
+
+        console.error("❌ Google Places library missing");
+
         return;
     }
 
-    const autocomplete = new google.maps.places.Autocomplete(input, {
-        types: ['establishment'],
-        fields: ['place_id','name','formatted_address']
-    });
+    autocomplete =
+        new google.maps.places.Autocomplete(
+            input,
+            {
+                types: ["establishment"],
+                fields: [
+                    "place_id",
+                    "name",
+                    "formatted_address"
+                ]
+            }
+        );
 
-    autocomplete.addListener('place_changed', function () {
+    autocomplete.addListener(
+        "place_changed",
+        onPlaceChanged
+    );
 
-        const place = autocomplete.getPlace();
+    console.log("✅ Google Places Ready");
+}
 
-        if (!place || !place.place_id) {
-            alert('Invalid Place');
-            return;
-        }
+function onPlaceChanged() {
 
-        document.getElementById('companyName').value = place.name || '';
-        document.getElementById('placeId').value = place.place_id || '';
-        document.getElementById('companyAddress').value = place.formatted_address || '';
+    const place = autocomplete.getPlace();
 
-        console.log('Autofill success');
-    });
+    console.log("📍 Place Selected:", place);
 
-    console.log('Google Places Ready');
-};
+    if (!place || !place.place_id) {
+
+        alert("Invalid Google Place");
+
+        return;
+    }
+
+    document.getElementById("companyName").value =
+        place.name || "";
+
+    document.getElementById("placeId").value =
+        place.place_id || "";
+
+    document.getElementById("companyAddress").value =
+        place.formatted_address || "";
+
+    console.log("✅ Autofill Completed");
+}
+
+window.initGoogleAutocomplete =
+    initGoogleAutocomplete;
 
 </script>
 
 <script async defer
 src="https://maps.googleapis.com/maps/api/js?key={{ google_maps_api_key }}&libraries=places&callback=initGoogleAutocomplete">
 </script>
-
 <script>
 
 let chartInstances = {};
