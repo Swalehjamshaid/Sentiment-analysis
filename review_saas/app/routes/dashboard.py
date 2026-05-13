@@ -37,46 +37,36 @@ class ChatRequest(BaseModel):
     message: str
 
 # ==========================================================
-# SAFE SERVICE IMPORTS
+# SAFE IMPORTS
 # ==========================================================
 
 def get_company_service():
-    try:
-        from app.services.company_service import CompanyService
-        return CompanyService
-    except Exception as e:
-        logger.exception("CompanyService import failed")
-        raise HTTPException(
-            status_code=500,
-            detail=f"CompanyService error: {str(e)}"
-        )
+
+    from app.services.company_service import CompanyService
+
+    return CompanyService
+
 
 def get_review_service():
-    try:
-        try:
-            from app.services.review_service import ReviewService
-            return ReviewService
-        except:
-            from app.services.scraper import ReviewService
-            return ReviewService
 
-    except Exception as e:
-        logger.exception("ReviewService import failed")
-        raise HTTPException(
-            status_code=500,
-            detail=f"ReviewService error: {str(e)}"
-        )
+    try:
+
+        from app.services.review_service import ReviewService
+
+        return ReviewService
+
+    except:
+
+        from app.services.scraper import ReviewService
+
+        return ReviewService
+
 
 def get_insights_service():
-    try:
-        from app.services.ai_insights_service import AIInsightsService
-        return AIInsightsService
-    except Exception as e:
-        logger.exception("InsightsService import failed")
-        raise HTTPException(
-            status_code=500,
-            detail=f"InsightsService error: {str(e)}"
-        )
+
+    from app.services.ai_insights_service import AIInsightsService
+
+    return AIInsightsService
 
 # ==========================================================
 # UTILITIES
@@ -88,6 +78,7 @@ def safe_rating(review):
         return int(review.get("rating", 0))
     except:
         return 0
+
 
 def calculate_sentiment(avg_rating: float):
 
@@ -101,7 +92,6 @@ def calculate_sentiment(avg_rating: float):
 
 # ==========================================================
 # GET COMPANIES
-# FRONTEND API READY
 # ==========================================================
 
 @router.get("/companies")
@@ -117,14 +107,25 @@ async def get_companies(request: Request):
             user["id"]
         )
 
+        formatted = []
+
+        for company in companies:
+
+            formatted.append({
+                "id": company.get("id"),
+                "name": company.get("name"),
+                "place_id": company.get("google_place_id"),
+                "address": company.get("address")
+            })
+
         return {
             "status": "success",
-            "companies": companies or []
+            "companies": formatted
         }
 
     except Exception as e:
 
-        logger.exception("Companies load failed")
+        logger.exception("Companies fetch failed")
 
         raise HTTPException(
             status_code=500,
@@ -145,13 +146,6 @@ async def add_company(
 
     try:
 
-        if not payload.get("place_id"):
-
-            raise HTTPException(
-                status_code=400,
-                detail="place_id is required"
-            )
-
         CompanyService = get_company_service()
 
         company = await CompanyService.create_company(
@@ -163,13 +157,12 @@ async def add_company(
 
         return {
             "status": "success",
-            "message": "Company added successfully",
             "company": company
         }
 
     except Exception as e:
 
-        logger.exception("Add company failed")
+        logger.exception("Company creation failed")
 
         raise HTTPException(
             status_code=500,
@@ -177,8 +170,7 @@ async def add_company(
         )
 
 # ==========================================================
-# DASHBOARD DATA
-# FRONTEND + DATABASE CONNECTED
+# MAIN DASHBOARD
 # ==========================================================
 
 @router.get("/dashboard/{company_id}")
@@ -215,11 +207,14 @@ async def get_dashboard_data(
 
         total_reviews = len(reviews)
 
-        ratings = [
-            safe_rating(r)
-            for r in reviews
-            if safe_rating(r) > 0
-        ]
+        ratings = []
+
+        for review in reviews:
+
+            rating = safe_rating(review)
+
+            if rating > 0:
+                ratings.append(rating)
 
         average_rating = round(
             statistics.mean(ratings),
@@ -227,24 +222,21 @@ async def get_dashboard_data(
         ) if ratings else 0
 
         positive_reviews = len([
-            r for r in reviews
-            if safe_rating(r) >= 4
-        ])
-
-        negative_reviews = len([
-            r for r in reviews
-            if safe_rating(r) <= 2
+            r for r in ratings if r >= 4
         ])
 
         neutral_reviews = len([
-            r for r in reviews
-            if safe_rating(r) == 3
+            r for r in ratings if r == 3
+        ])
+
+        negative_reviews = len([
+            r for r in ratings if r <= 2
         ])
 
         reputation_score = round(
             (average_rating / 5) * 100,
             2
-        )
+        ) if average_rating else 0
 
         sentiment_score = round(
             (positive_reviews / total_reviews) * 100,
@@ -267,29 +259,48 @@ async def get_dashboard_data(
         ]
 
         return {
+
             "status": "success",
+
             "company_id": company_id,
+
             "total_reviews": total_reviews,
+
             "average_rating": average_rating,
+
             "positive_reviews": positive_reviews,
+
             "negative_reviews": negative_reviews,
+
             "neutral_reviews": neutral_reviews,
+
             "reputation_score": reputation_score,
+
             "revenue_risk": revenue_risk,
+
             "sentiment_score": sentiment_score,
-            "customer_sentiment": calculate_sentiment(
-                average_rating
-            ),
-            "rating_distribution": rating_distribution,
+
+            "customer_sentiment":
+                calculate_sentiment(
+                    average_rating
+                ),
+
+            "rating_distribution":
+                rating_distribution,
+
             "chart_labels": [
-                "1 Star",
-                "2 Star",
-                "3 Star",
+                "5 Star",
                 "4 Star",
-                "5 Star"
+                "3 Star",
+                "2 Star",
+                "1 Star"
             ],
-            "chart_values": rating_distribution,
-            "last_updated": datetime.utcnow().isoformat()
+
+            "chart_values":
+                rating_distribution,
+
+            "last_updated":
+                datetime.utcnow().isoformat()
         }
 
     except HTTPException:
@@ -297,7 +308,7 @@ async def get_dashboard_data(
 
     except Exception as e:
 
-        logger.exception("Dashboard load failed")
+        logger.exception("Dashboard API failed")
 
         raise HTTPException(
             status_code=500,
@@ -339,34 +350,14 @@ async def get_company_reviews(
             limit
         )
 
-        formatted_reviews = []
-
-        for review in reviews:
-
-            formatted_reviews.append({
-                "author": review.get("author_name", "Anonymous"),
-                "rating": review.get("rating", 0),
-                "review_text": review.get("text")
-                or review.get("review_text")
-                or "",
-                "created_at": review.get(
-                    "relative_time_description"
-                ) or review.get(
-                    "created_at"
-                ) or "-",
-                "sentiment": calculate_sentiment(
-                    review.get("rating", 0)
-                )
-            })
-
         return {
             "status": "success",
-            "reviews": formatted_reviews
+            "reviews": reviews
         }
 
     except Exception as e:
 
-        logger.exception("Reviews load failed")
+        logger.exception("Review fetch failed")
 
         raise HTTPException(
             status_code=500,
@@ -374,7 +365,7 @@ async def get_company_reviews(
         )
 
 # ==========================================================
-# INGEST GOOGLE REVIEWS
+# INGEST REVIEWS
 # ==========================================================
 
 @router.post("/reviews/ingest/{company_id}")
@@ -408,12 +399,13 @@ async def ingest_reviews(
 
         return {
             "status": "success",
-            "message": "Reviews synced successfully",
-            "reviews_collected": result.get(
-                "ingested_count",
-                0
-            ),
-            "synced_at": datetime.utcnow().isoformat()
+            "reviews_collected":
+                result.get(
+                    "ingested_count",
+                    0
+                ),
+            "synced_at":
+                datetime.utcnow().isoformat()
         }
 
     except Exception as e:
@@ -462,13 +454,12 @@ async def ai_insights(
 
         return {
             "status": "success",
-            "insights": insights,
-            "generated_at": datetime.utcnow().isoformat()
+            "insights": insights
         }
 
     except Exception as e:
 
-        logger.exception("AI insights failed")
+        logger.exception("Insights failed")
 
         raise HTTPException(
             status_code=500,
@@ -522,25 +513,38 @@ async def dashboard_ai_chat(
         ) if ratings else 0
 
         return {
+
             "status": "success",
+
             "chatbot": {
-                "question": payload.message,
-                "average_rating": avg_rating,
-                "customer_sentiment": calculate_sentiment(
-                    avg_rating
-                ),
-                "business_health_score": round(
-                    (avg_rating / 5) * 100,
-                    2
-                ),
+
+                "question":
+                    payload.message,
+
+                "average_rating":
+                    avg_rating,
+
+                "customer_sentiment":
+                    calculate_sentiment(
+                        avg_rating
+                    ),
+
+                "business_health_score":
+                    round(
+                        (avg_rating / 5) * 100,
+                        2
+                    ),
+
                 "recommendations": [
                     "Reply quickly to negative reviews",
-                    "Encourage happy customers to review",
-                    "Monitor review sentiment weekly",
                     "Track repeated complaints",
-                    "Improve customer response time"
+                    "Improve customer support",
+                    "Encourage happy customers to review",
+                    "Monitor sentiment weekly"
                 ],
-                "generated_at": datetime.utcnow().isoformat()
+
+                "generated_at":
+                    datetime.utcnow().isoformat()
             }
         }
 
