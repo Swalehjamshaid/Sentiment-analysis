@@ -436,7 +436,7 @@ async function loadCompanies() {
 
         select.innerHTML = '<option value="">Choose Company</option>';
 
-        data.forEach(company => {
+        (data.companies || []).forEach(company => {
 
             const option = document.createElement('option');
 
@@ -553,7 +553,9 @@ async function loadRecentReviews(companyId) {
 
         const response = await fetch(`/api/reviews/company/${companyId}`);
 
-        const reviews = await response.json();
+   const responseData = await response.json();
+
+const reviews = responseData.reviews || [];
 
         const tbody = document.getElementById('reviewsTableBody');
 
