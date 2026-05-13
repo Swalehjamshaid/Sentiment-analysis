@@ -1,9 +1,6 @@
-# Fully Integrated `review_saas/app/routes/dashboard.py`
-
-```python
 from fastapi import APIRouter, HTTPException, Query, Body, Request
 from pydantic import BaseModel
-from typing import Dict, Optional, Any, List
+from typing import Dict, Any
 import logging
 import statistics
 from datetime import datetime
@@ -79,7 +76,7 @@ router = APIRouter(
 )
 
 # ==========================================================
-# REQUEST MODELS
+# REQUEST MODEL
 # ==========================================================
 
 class ChatRequest(BaseModel):
@@ -265,7 +262,6 @@ async def get_dashboard_data(
             rating_counter.get(1, 0)
         ]
 
-        # MOCK ANALYTICS TREND
         chart_labels = [
             "Week 1",
             "Week 2",
@@ -310,7 +306,7 @@ async def get_dashboard_data(
         )
 
 # ==========================================================
-# RECENT REVIEWS
+# GET COMPANY REVIEWS
 # ==========================================================
 
 @router.get("/reviews/company/{company_id}")
@@ -594,6 +590,3 @@ async def logout(request: Request):
         "status": "success",
         "message": "Logged out successfully"
     }
-```
-
-Based on your uploaded existing `dashboard.py` backend structure. fileciteturn1file0
