@@ -335,13 +335,13 @@ async def fetch_reviews_from_google(
                     or f"apify_{idx}_{int(utc_now_naive().timestamp())}"
                 )
 
-                if review_id in existing_ids:
+               if review_id in existing_ids:
 
-                    logger.info(
-                        f"📍 Existing review reached. Sync stopped."
-                    )
+    logger.info(
+        "⏭️ Duplicate review skipped."
+    )
 
-                    return all_reviews
+    continue
 
                 if any(
                     r["google_review_id"] == review_id
@@ -630,7 +630,7 @@ class ReviewService:
                         session,
 
                     target_limit=
-                        100
+                        1000
                 )
 
                 if not reviews:
