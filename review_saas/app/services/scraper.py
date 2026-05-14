@@ -286,7 +286,7 @@ async def fetch_reviews_from_google(
             "maxReviews": target_limit,
 
             "reviewsSort": "newest",
-
+"reviewsOrigin": "all",
             "language": "en"
         }
 
