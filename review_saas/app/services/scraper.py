@@ -335,13 +335,13 @@ async def fetch_reviews_from_google(
                     or f"apify_{idx}_{int(utc_now_naive().timestamp())}"
                 )
 
-               if review_id in existing_ids:
+                               if review_id in existing_ids:
 
-    logger.info(
-        "⏭️ Duplicate review skipped."
-    )
+                    logger.info(
+                        "⏭️ Duplicate review skipped."
+                    )
 
-    continue
+                    continue
 
                 if any(
                     r["google_review_id"] == review_id
