@@ -88,7 +88,6 @@ pwd_context = CryptContext(
 # ==========================================================
 
 @asynccontextmanager
-
 async def lifespan(app: FastAPI):
 
     logger.info(
@@ -343,6 +342,12 @@ try:
 
     print(
         "✅ reviews imported successfully"
+    )
+
+    from app.routes import chatbot
+
+    print(
+        "✅ chatbot imported successfully"
     )
 
 except Exception as e:
@@ -669,6 +674,13 @@ app.include_router(
     prefix="/api",
 
     tags=["reviews"]
+)
+
+app.include_router(
+
+    chatbot.router,
+
+    tags=["chatbot"]
 )
 
 # ==========================================================
