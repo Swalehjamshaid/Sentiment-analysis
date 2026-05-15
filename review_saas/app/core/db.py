@@ -18,14 +18,8 @@ from sqlalchemy import text
 from app.core.base import Base
 
 # VERY IMPORTANT
-# This forces SQLAlchemy to load ALL models
+# FORCE LOAD ALL MODELS
 from app.core.models import *
-
-# ==========================================================
-# SCHEMA VERSION
-# ==========================================================
-
-CURRENT_SCHEMA_VERSION = "2026-05-15-V1"
 
 # ==========================================================
 # LOGGING
@@ -36,6 +30,12 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(
     "app.core.db"
 )
+
+# ==========================================================
+# SCHEMA VERSION
+# ==========================================================
+
+CURRENT_SCHEMA_VERSION = "2026-05-15-V1"
 
 # ==========================================================
 # DATABASE URL
@@ -117,7 +117,7 @@ async def init_models():
         async with engine.begin() as conn:
 
             # ==============================================
-            # CREATE SCHEMA TRACKER
+            # CREATE SCHEMA TRACKER TABLE
             # ==============================================
 
             await conn.execute(
@@ -133,3 +133,107 @@ async def init_models():
             )
 
             # ==============================================
+            # GET CURRENT DATABASE VERSION
+            # ==============================================
+
+            result = await conn.execute(
+
+                text(
+                    """
+                    SELECT version
+                    FROM _schema_tracker
+                    LIMIT 1
+                    """
+                )
+
+            )
+
+            db_version = result.scalar()
+
+            # ==============================================
+            # SCHEMA VERSION CHECK
+            # ==============================================
+
+            if db_version != CURRENT_SCHEMA_VERSION:
+
+                logger.warning(
+
+                    f"⚠️ Schema update detected | DB={db_version} | CODE={CURRENT_SCHEMA_VERSION}"
+
+                )
+
+            else:
+
+                logger.info(
+
+                    f"🧬 Schema version {CURRENT_SCHEMA_VERSION} already active"
+
+                )
+
+            # ==============================================
+            # CREATE TABLES SAFELY
+            # ==============================================
+
+            await conn.run_sync(
+                Base.metadata.create_all
+            )
+
+            # ==============================================
+            # UPDATE SCHEMA TRACKER
+            # ==============================================
+
+            await conn.execute(
+                text(
+                    "DELETE FROM _schema_tracker"
+                )
+            )
+
+            await conn.execute(
+
+                text(
+                    """
+                    INSERT INTO _schema_tracker (version)
+                    VALUES (:v)
+                    """
+                ),
+
+                {
+                    "v":
+                        CURRENT_SCHEMA_VERSION
+                }
+
+            )
+
+            logger.info(
+                "✅ Database initialized successfully"
+            )
+
+    except Exception as e:
+
+        logger.error(
+            f"❌ Database initialization failed: {e}"
+        )
+
+        raise e
+
+# ==========================================================
+# DATABASE SESSION DEPENDENCY
+# ==========================================================
+
+async def get_db():
+
+    async with AsyncSessionLocal() as session:
+
+        try:
+
+            yield session
+
+        finally:
+
+            await session.close()
+
+# ==========================================================
+# BACKWARD COMPATIBILITY
+# ==========================================================
+
+get_session = get_db
