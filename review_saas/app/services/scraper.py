@@ -502,10 +502,9 @@ async def fetch_reviews_from_google(
 
             return []
 
-        google_maps_url = (
-            f"https://www.google.com/maps/search/"
-            f"?api=1&query=Google&query_place_id={place_id}"
-        )
+       google_maps_url = (
+    f"https://www.google.com/maps/place/?q=place_id:{place_id}"
+)
 
         logger.info(
             f"🚀 Starting APIFY Sync for {company_name}"
