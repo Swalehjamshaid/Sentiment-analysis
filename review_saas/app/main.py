@@ -410,10 +410,6 @@ async def login_page(
 # LOGIN HANDLER
 # ==========================================================
 
-@app.post("/api/auth/login")
-@app.post("/login")
-
-async def handle_login(
 
     request: Request,
 
