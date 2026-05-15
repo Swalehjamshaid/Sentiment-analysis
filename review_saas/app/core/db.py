@@ -12,16 +12,20 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy import text
 
 # ==========================================================
-# BASE IMPORT
+# BASE + MODELS IMPORT
 # ==========================================================
 
 from app.core.base import Base
+
+# VERY IMPORTANT
+# This forces SQLAlchemy to load ALL models
+from app.core.models import *
 
 # ==========================================================
 # SCHEMA VERSION
 # ==========================================================
 
-CURRENT_SCHEMA_VERSION = "2026-05-13-V21"
+CURRENT_SCHEMA_VERSION = "2026-05-15-V1"
 
 # ==========================================================
 # LOGGING
@@ -44,11 +48,11 @@ DATABASE_URL = os.getenv(
 if not DATABASE_URL:
 
     raise RuntimeError(
-        "DATABASE_URL not set"
+        "❌ DATABASE_URL not set"
     )
 
 # ==========================================================
-# FIX RAILWAY POSTGRES
+# FIX RAILWAY POSTGRES URL
 # ==========================================================
 
 if DATABASE_URL.startswith(
@@ -105,158 +109,27 @@ SessionLocal = AsyncSessionLocal
 async def init_models():
 
     """
-    FINAL DATABASE INITIALIZATION
+    SAFE DATABASE INITIALIZATION
     """
 
-    import app.core.models as models
+    try:
 
-    async with engine.begin() as conn:
-
-        # ==================================================
-        # CREATE SCHEMA TRACKER
-        # ==================================================
-
-        await conn.execute(
-
-            text(
-                "CREATE TABLE IF NOT EXISTS _schema_tracker (version TEXT)"
-            )
-        )
-
-        # ==================================================
-        # CHECK CURRENT VERSION
-        # ==================================================
-
-        result = await conn.execute(
-
-            text(
-                "SELECT version FROM _schema_tracker LIMIT 1"
-            )
-        )
-
-        db_version = result.scalar()
-
-        # ==================================================
-        # SCHEMA RESET
-        # ==================================================
-
-        if db_version != CURRENT_SCHEMA_VERSION:
-
-            logger.warning(
-
-                f"⚠️ Schema mismatch detected | DB={db_version} | CODE={CURRENT_SCHEMA_VERSION}"
-            )
-
-            logger.warning(
-                "🗑️ Starting Nuclear Reset..."
-            )
-
-            tables_to_wipe = [
-
-                "competitors",
-
-                "company_cids",
-
-                "google_reviews",
-
-                "google_reviews_raw",
-
-                "reviews",
-
-                "audit_logs",
-
-                "notifications",
-
-                "companies",
-
-                "users",
-
-                "verification_tokens",
-
-                "config",
-            ]
-
-            for table in tables_to_wipe:
-
-                try:
-
-                    await conn.execute(
-
-                        text(
-                            f'DROP TABLE IF EXISTS "{table}" CASCADE'
-                        )
-                    )
-
-                    logger.info(
-                        f"🗑️ Dropped: {table}"
-                    )
-
-                except Exception as e:
-
-                    logger.error(
-                        f"❌ Failed dropping {table}: {e}"
-                    )
+        async with engine.begin() as conn:
 
             # ==============================================
-            # CREATE NEW TABLES
+            # CREATE SCHEMA TRACKER
             # ==============================================
-
-            await conn.run_sync(
-                models.Base.metadata.create_all
-            )
-
-            # ==============================================
-            # UPDATE SCHEMA TRACKER
-            # ==============================================
-
-            await conn.execute(
-                text("DELETE FROM _schema_tracker")
-            )
 
             await conn.execute(
 
                 text(
-                    "INSERT INTO _schema_tracker (version) VALUES (:v)"
-                ),
+                    """
+                    CREATE TABLE IF NOT EXISTS _schema_tracker (
+                        version TEXT
+                    )
+                    """
+                )
 
-                {
-                    "v":
-                        CURRENT_SCHEMA_VERSION
-                }
             )
 
-            logger.info(
-                f"✅ Database rebuilt successfully | Version={CURRENT_SCHEMA_VERSION}"
-            )
-
-        else:
-
-            await conn.run_sync(
-                models.Base.metadata.create_all
-            )
-
-            logger.info(
-                f"🧬 Schema version {CURRENT_SCHEMA_VERSION} already active"
-            )
-
-# ==========================================================
-# DATABASE SESSION DEPENDENCY
-# ==========================================================
-
-async def get_db():
-
-    async with AsyncSessionLocal() as session:
-
-        try:
-
-            yield session
-
-        finally:
-
-            await session.close()
-
-# ==========================================================
-# BACKWARD COMPATIBILITY
-# ==========================================================
-
-get_session = get_db
+            # ==============================================
