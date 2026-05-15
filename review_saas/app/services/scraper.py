@@ -1,20 +1,22 @@
 # filename: app/services/scraper.py
 
 # ==========================================================
-# REVIEW INTELLIGENCE SCRAPER — APIFY + POSTGRESQL INTEGRATED
+# REVIEW INTELLIGENCE SCRAPER
+# APIFY + CRAWLEE + SERPER + POSTGRESQL
 # ==========================================================
 
 import os
-import logging
-import asyncio
 import re
 import json
+import asyncio
+import logging
 import requests
 
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 
 from apify_client import ApifyClient
+
 from crawlee.crawlers import (
     PlaywrightCrawler,
     PlaywrightCrawlingContext
@@ -25,10 +27,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.models import Company, Review
 
+# ==========================================================
+# LOGGER
+# ==========================================================
+
 logger = logging.getLogger("app.scraper")
 
 # ==========================================================
-# API CONFIGURATION
+# ENV VARIABLES
 # ==========================================================
 
 APIFY_API_TOKEN = os.getenv("APIFY_API_TOKEN")
@@ -39,60 +45,19 @@ SERPER_API_KEY = os.getenv("SERPER_API_KEY")
 # ==========================================================
 
 if not APIFY_API_TOKEN:
-    logger.warning("⚠️ APIFY_API_TOKEN is missing")
+    logger.warning("⚠️ APIFY_API_TOKEN missing")
 
 apify_client = ApifyClient(APIFY_API_TOKEN)
 
 # ==========================================================
-# SAFE DATETIME
+# SAFE UTC DATETIME
 # ==========================================================
 
 def utc_now_naive() -> datetime:
-
     return datetime.utcnow().replace(tzinfo=None)
 
 # ==========================================================
-# RELATIVE DATE PARSER
-# ==========================================================
-
-def parse_relative_date(date_text: str) -> datetime:
-
-    if not date_text or not isinstance(date_text, str):
-        return utc_now_naive()
-
-    now = utc_now_naive()
-
-    match = re.search(r'(\d+)', date_text)
-
-    quantity = int(match.group(1)) if match else 1
-
-    date_text = date_text.lower()
-
-    if 'second' in date_text:
-        return now - timedelta(seconds=quantity)
-
-    elif 'minute' in date_text:
-        return now - timedelta(minutes=quantity)
-
-    elif 'hour' in date_text:
-        return now - timedelta(hours=quantity)
-
-    elif 'day' in date_text:
-        return now - timedelta(days=quantity)
-
-    elif 'week' in date_text:
-        return now - timedelta(weeks=quantity)
-
-    elif 'month' in date_text:
-        return now - timedelta(days=quantity * 30)
-
-    elif 'year' in date_text:
-        return now - timedelta(days=quantity * 365)
-
-    return now
-
-# ==========================================================
-# SAFE ISO DATE PARSER
+# SAFE ISO DATETIME PARSER
 # ==========================================================
 
 def safe_parse_iso_datetime(
@@ -113,10 +78,50 @@ def safe_parse_iso_datetime(
     except Exception as e:
 
         logger.warning(
-            f"⚠️ Date parse failed: {e}"
+            f"⚠️ Failed parsing date: {e}"
         )
 
         return utc_now_naive()
+
+# ==========================================================
+# RELATIVE DATE PARSER
+# ==========================================================
+
+def parse_relative_date(date_text: str) -> datetime:
+
+    if not date_text:
+        return utc_now_naive()
+
+    now = utc_now_naive()
+
+    match = re.search(r"(\d+)", date_text)
+
+    quantity = int(match.group(1)) if match else 1
+
+    date_text = date_text.lower()
+
+    if "second" in date_text:
+        return now - timedelta(seconds=quantity)
+
+    if "minute" in date_text:
+        return now - timedelta(minutes=quantity)
+
+    if "hour" in date_text:
+        return now - timedelta(hours=quantity)
+
+    if "day" in date_text:
+        return now - timedelta(days=quantity)
+
+    if "week" in date_text:
+        return now - timedelta(weeks=quantity)
+
+    if "month" in date_text:
+        return now - timedelta(days=quantity * 30)
+
+    if "year" in date_text:
+        return now - timedelta(days=quantity * 365)
+
+    return now
 
 # ==========================================================
 # SERPER FALLBACK
@@ -124,11 +129,11 @@ def safe_parse_iso_datetime(
 
 async def fetch_from_serper_fallback(
     company_name: str,
-    limit: int = 10
+    limit: int = 300
 ) -> List[Dict[str, Any]]:
 
-    logger.info(
-        f"📡 Serper fallback for {company_name}"
+    logger.warning(
+        f"⚠️ Using Serper fallback for {company_name}"
     )
 
     if not SERPER_API_KEY:
@@ -139,27 +144,27 @@ async def fetch_from_serper_fallback(
 
         return []
 
-    url = "https://google.serper.dev/search"
-
-    payload = json.dumps({
-        "q": f"{company_name} reviews",
-        "gl": "pk",
-        "hl": "en"
-    })
-
-    headers = {
-        "X-API-KEY": SERPER_API_KEY,
-        "Content-Type": "application/json"
-    }
-
     try:
+
+        url = "https://google.serper.dev/search"
+
+        payload = json.dumps({
+            "q": f"{company_name} reviews",
+            "gl": "pk",
+            "hl": "en"
+        })
+
+        headers = {
+            "X-API-KEY": SERPER_API_KEY,
+            "Content-Type": "application/json"
+        }
 
         response = await asyncio.to_thread(
             lambda: requests.post(
                 url,
                 headers=headers,
                 data=payload,
-                timeout=20
+                timeout=30
             )
         )
 
@@ -167,41 +172,37 @@ async def fetch_from_serper_fallback(
 
         data = response.json()
 
-        results = []
+        reviews = []
 
-        for idx, entry in enumerate(
+        for idx, item in enumerate(
             data.get("organic", [])
         ):
 
-            if len(results) >= limit:
+            if len(reviews) >= limit:
                 break
 
-            results.append({
+            reviews.append({
 
                 "google_review_id":
-                    f"serper_{idx}_{int(utc_now_naive().timestamp())}",
+                    f"serper_{idx}_{int(datetime.utcnow().timestamp())}",
 
                 "author_name":
-                    entry.get(
-                        "title",
-                        "Web Mention"
-                    ),
+                    item.get("title", "Anonymous"),
 
-                "rating": 5,
+                "rating":
+                    5,
 
                 "text":
-                    entry.get(
-                        "snippet",
-                        "No content"
-                    ),
+                    item.get("snippet", ""),
 
                 "google_review_time":
                     utc_now_naive(),
 
-                "review_likes": 0
+                "review_likes":
+                    0
             })
 
-        return results
+        return reviews
 
     except Exception as e:
 
@@ -210,18 +211,25 @@ async def fetch_from_serper_fallback(
         )
 
         return []
+
 # ==========================================================
-# PLAYWRIGHT FALLBACK SCRAPER
+# CRAWLEE PLAYWRIGHT FALLBACK
 # ==========================================================
 
-async def fetch_reviews_playwright(
-    url: str
+async def fetch_reviews_with_crawlee(
+    google_maps_url: str,
+    limit: int = 300
 ):
+
+    logger.warning(
+        "⚠️ Using Crawlee Playwright fallback..."
+    )
 
     reviews = []
 
     crawler = PlaywrightCrawler(
-        headless=True
+        headless=True,
+        max_requests_per_crawl=1
     )
 
     @crawler.router.default_handler
@@ -232,27 +240,201 @@ async def fetch_reviews_playwright(
 
         page = context.page
 
-        await page.wait_for_timeout(5000)
+        try:
 
-        title = await page.title()
+            logger.info(
+                f"🌐 Opening: {google_maps_url}"
+            )
 
-        reviews.append({
-            "title": title
-        })
+            await page.goto(
+                google_maps_url,
+                wait_until="networkidle"
+            )
 
-    await crawler.run([url])
+            await page.wait_for_timeout(5000)
+
+            # ==================================================
+            # OPEN REVIEWS PANEL
+            # ==================================================
+
+            try:
+
+                review_button = page.locator(
+                    'button[jsaction*="pane.reviewChart.moreReviews"]'
+                )
+
+                if await review_button.count() > 0:
+
+                    await review_button.first.click()
+
+                    await page.wait_for_timeout(5000)
+
+            except Exception as e:
+
+                logger.warning(
+                    f"⚠️ Failed opening reviews: {e}"
+                )
+
+            # ==================================================
+            # SCROLL REVIEWS
+            # ==================================================
+
+            for _ in range(30):
+
+                await page.mouse.wheel(0, 7000)
+
+                await page.wait_for_timeout(2000)
+
+            # ==================================================
+            # GET REVIEW CARDS
+            # ==================================================
+
+            review_cards = page.locator(
+                'div[data-review-id]'
+            )
+
+            count = await review_cards.count()
+
+            logger.info(
+                f"📦 Crawlee found {count} review cards"
+            )
+
+            for i in range(min(count, limit)):
+
+                try:
+
+                    card = review_cards.nth(i)
+
+                    review_id = await card.get_attribute(
+                        "data-review-id"
+                    )
+
+                    author = "Anonymous"
+
+                    rating = 5
+
+                    text = ""
+
+                    # ==============================================
+                    # AUTHOR
+                    # ==============================================
+
+                    try:
+
+                        author_locator = card.locator(
+                            '.d4r55'
+                        )
+
+                        if await author_locator.count() > 0:
+
+                            author = await author_locator.first.inner_text()
+
+                    except:
+                        pass
+
+                    # ==============================================
+                    # RATING
+                    # ==============================================
+
+                    try:
+
+                        rating_locator = card.locator(
+                            'span[role="img"]'
+                        )
+
+                        if await rating_locator.count() > 0:
+
+                            rating_text = await rating_locator.first.get_attribute(
+                                "aria-label"
+                            )
+
+                            match = re.search(
+                                r'(\d)',
+                                rating_text or ""
+                            )
+
+                            if match:
+                                rating = int(match.group(1))
+
+                    except:
+                        pass
+
+                    # ==============================================
+                    # REVIEW TEXT
+                    # ==============================================
+
+                    try:
+
+                        text_locator = card.locator(
+                            '.wiI7pd'
+                        )
+
+                        if await text_locator.count() > 0:
+
+                            text = await text_locator.first.inner_text()
+
+                    except:
+                        pass
+
+                    reviews.append({
+
+                        "google_review_id":
+                            review_id or f"crawl_{i}",
+
+                        "author_name":
+                            author,
+
+                        "rating":
+                            rating,
+
+                        "text":
+                            text,
+
+                        "google_review_time":
+                            utc_now_naive(),
+
+                        "review_likes":
+                            0
+                    })
+
+                except Exception as item_error:
+
+                    logger.error(
+                        f"❌ Crawlee review parse failed: {item_error}"
+                    )
+
+                    continue
+
+        except Exception as e:
+
+            logger.error(
+                f"❌ Crawlee failed: {e}"
+            )
+
+    await crawler.run([google_maps_url])
+
+    logger.info(
+        f"✅ Crawlee collected {len(reviews)} reviews"
+    )
 
     return reviews
+
 # ==========================================================
-# MAIN REVIEW SCRAPER
+# MAIN GOOGLE REVIEW FETCHER
 # ==========================================================
 
 async def fetch_reviews_from_google(
+
     place_id: Optional[str] = None,
+
     company_id: Optional[int] = None,
+
     session: Optional[AsyncSession] = None,
-    target_limit: int = 100,
+
+    target_limit: int = 300,
+
     **kwargs
+
 ) -> List[Dict[str, Any]]:
 
     all_reviews: List[Dict[str, Any]] = []
@@ -261,10 +443,12 @@ async def fetch_reviews_from_google(
 
     company_name = "Business"
 
+    google_maps_url = ""
+
     try:
 
         # ==================================================
-        # LOAD EXISTING REVIEW IDS
+        # LOAD EXISTING IDS
         # ==================================================
 
         if session and company_id:
@@ -275,27 +459,27 @@ async def fetch_reviews_from_google(
                 Review.company_id == company_id
             )
 
-            res = await session.execute(stmt)
+            result = await session.execute(stmt)
 
             existing_ids = set(
-                res.scalars().all()
+                result.scalars().all()
             )
 
             logger.info(
                 f"✅ Existing reviews in DB: {len(existing_ids)}"
             )
 
-            comp_stmt = select(
+            company_stmt = select(
                 Company
             ).where(
                 Company.id == company_id
             )
 
-            comp_res = await session.execute(
-                comp_stmt
+            company_result = await session.execute(
+                company_stmt
             )
 
-            company = comp_res.scalars().first()
+            company = company_result.scalars().first()
 
             if company:
 
@@ -313,27 +497,35 @@ async def fetch_reviews_from_google(
         if not place_id:
 
             logger.error(
-                f"❌ No Place ID for {company_name}"
+                f"❌ Missing Google Place ID for {company_name}"
             )
 
             return []
+
+        google_maps_url = (
+            f"https://www.google.com/maps/search/"
+            f"?api=1&query=Google&query_place_id={place_id}"
+        )
 
         logger.info(
             f"🚀 Starting APIFY Sync for {company_name}"
         )
 
+        logger.info(
+            f"📍 Google Maps URL: {google_maps_url}"
+        )
+
         # ==================================================
-        # FETCH EXTRA REVIEWS TO GET NEW UNIQUE REVIEWS
+        # APIFY INPUT
         # ==================================================
 
-        fetch_limit = target_limit + 500
+        fetch_limit = target_limit + 100
 
         run_input = {
 
             "startUrls": [
                 {
-                    "url":
-                    f"https://www.google.com/maps/place/?q=place_id:{place_id}"
+                    "url": google_maps_url
                 }
             ],
 
@@ -341,13 +533,13 @@ async def fetch_reviews_from_google(
 
             "reviewsSort": "newest",
 
-            "reviewsOrigin": "all",
+            "reviewsOrigin": "google",
 
             "language": "en"
         }
 
         logger.info(
-            f"📡 Fetching {fetch_limit} reviews from APIFY"
+            f"📦 APIFY INPUT: {run_input}"
         )
 
         # ==================================================
@@ -355,9 +547,10 @@ async def fetch_reviews_from_google(
         # ==================================================
 
         run = await asyncio.to_thread(
+
             lambda:
             apify_client.actor(
-                "compass/google-maps-reviews-scraper"
+                "compass~google-maps-reviews-scraper"
             ).call(
                 run_input=run_input
             )
@@ -369,21 +562,20 @@ async def fetch_reviews_from_google(
 
         if not dataset_id:
 
-            logger.error(
-                "❌ No dataset returned from APIFY"
+            raise Exception(
+                "No dataset returned from APIFY"
             )
-
-            return []
 
         logger.info(
             f"✅ APIFY completed | Dataset: {dataset_id}"
         )
 
         # ==================================================
-        # LOAD DATASET ITEMS
+        # LOAD APIFY DATASET
         # ==================================================
 
         dataset_items = await asyncio.to_thread(
+
             lambda:
             apify_client.dataset(
                 dataset_id
@@ -393,6 +585,12 @@ async def fetch_reviews_from_google(
         logger.info(
             f"📦 Total Reviews fetched from APIFY: {len(dataset_items)}"
         )
+
+        if not dataset_items:
+
+            raise Exception(
+                "APIFY returned empty reviews"
+            )
 
         skipped_duplicates = 0
 
@@ -406,21 +604,21 @@ async def fetch_reviews_from_google(
 
                 review_id = (
                     review.get("reviewId")
-                    or f"apify_{idx}_{int(utc_now_naive().timestamp())}"
+                    or f"apify_{idx}_{int(datetime.utcnow().timestamp())}"
                 )
 
-                # ==========================================
-                # SKIP EXISTING DATABASE REVIEWS
-                # ==========================================
+                # ==============================================
+                # DATABASE DUPLICATES
+                # ==============================================
 
                 if review_id in existing_ids:
 
                     skipped_duplicates += 1
                     continue
 
-                # ==========================================
-                # SKIP DUPLICATES IN CURRENT SESSION
-                # ==========================================
+                # ==============================================
+                # SESSION DUPLICATES
+                # ==============================================
 
                 if any(
                     r["google_review_id"] == review_id
@@ -430,14 +628,14 @@ async def fetch_reviews_from_google(
                     skipped_duplicates += 1
                     continue
 
-                # ==========================================
-                # EXTRACT REVIEW DATA
-                # ==========================================
+                # ==============================================
+                # EXTRACT DATA
+                # ==============================================
 
                 review_text = (
                     review.get("text")
                     or review.get("reviewText")
-                    or "No content provided."
+                    or "No content"
                 )
 
                 author_name = (
@@ -468,10 +666,6 @@ async def fetch_reviews_from_google(
                 if likes is None:
                     likes = 0
 
-                # ==========================================
-                # APPEND CLEAN REVIEW
-                # ==========================================
-
                 all_reviews.append({
 
                     "google_review_id":
@@ -493,23 +687,19 @@ async def fetch_reviews_from_google(
                         likes
                 })
 
-                # ==========================================
-                # STOP WHEN TARGET REACHED
-                # ==========================================
-
                 if len(all_reviews) >= target_limit:
                     break
 
-            except Exception as review_error:
+            except Exception as item_error:
 
                 logger.error(
-                    f"❌ Review processing failed: {review_error}"
+                    f"❌ Review processing failed: {item_error}"
                 )
 
                 continue
 
         logger.info(
-            f"✅ New unique reviews collected: {len(all_reviews)}"
+            f"✅ APIFY collected {len(all_reviews)} reviews"
         )
 
         logger.info(
@@ -518,11 +708,36 @@ async def fetch_reviews_from_google(
 
         return all_reviews
 
-    except Exception as primary_err:
+    # ======================================================
+    # FALLBACK SYSTEM
+    # ======================================================
+
+    except Exception as apify_error:
 
         logger.error(
-            f"❌ APIFY sync failed: {primary_err}"
+            f"❌ APIFY failed: {apify_error}"
         )
+
+        logger.warning(
+            "⚠️ Switching to Crawlee fallback..."
+        )
+
+        try:
+
+            crawlee_reviews = await fetch_reviews_with_crawlee(
+                google_maps_url=google_maps_url,
+                limit=target_limit
+            )
+
+            if crawlee_reviews:
+
+                return crawlee_reviews
+
+        except Exception as crawlee_error:
+
+            logger.error(
+                f"❌ Crawlee fallback failed: {crawlee_error}"
+            )
 
         logger.warning(
             "⚠️ Switching to Serper fallback..."
@@ -530,7 +745,7 @@ async def fetch_reviews_from_google(
 
         return await fetch_from_serper_fallback(
             company_name,
-            target_limit
+            limit=target_limit
         )
 
 # ==========================================================
@@ -546,7 +761,7 @@ class ReviewService:
     @staticmethod
     async def get_latest_reviews(
         company_id: int,
-        limit: int = 100
+        limit: int = 300
     ):
 
         from app.core.db import AsyncSessionLocal
@@ -574,98 +789,60 @@ class ReviewService:
 
                 for review in reviews:
 
-                    try:
+                    created_at = getattr(
+                        review,
+                        "google_review_time",
+                        None
+                    )
 
-                        created_at = getattr(
-                            review,
-                            "google_review_time",
-                            None
-                        )
+                    if created_at:
+                        created_at = created_at.isoformat()
 
-                        if created_at:
+                    formatted_reviews.append({
 
-                            created_at = (
-                                created_at.isoformat()
+                        "id":
+                            getattr(review, "id", None),
+
+                        "author_name":
+                            getattr(
+                                review,
+                                "author_name",
+                                "Anonymous"
+                            ),
+
+                        "rating":
+                            getattr(review, "rating", 0),
+
+                        "text":
+                            getattr(review, "text", ""),
+
+                        "review_text":
+                            getattr(review, "text", ""),
+
+                        "created_at":
+                            created_at,
+
+                        "relative_time_description":
+                            created_at,
+
+                        "review_likes":
+                            getattr(
+                                review,
+                                "review_likes",
+                                0
+                            ),
+
+                        "sentiment":
+                            (
+                                "positive"
+                                if getattr(review, "rating", 0) >= 4
+
+                                else "negative"
+                                if getattr(review, "rating", 0) <= 2
+
+                                else "neutral"
                             )
-
-                        formatted_reviews.append({
-
-                            "id":
-                                getattr(
-                                    review,
-                                    "id",
-                                    None
-                                ),
-
-                            "author_name":
-                                getattr(
-                                    review,
-                                    "author_name",
-                                    "Anonymous"
-                                ),
-
-                            "rating":
-                                getattr(
-                                    review,
-                                    "rating",
-                                    0
-                                ),
-
-                            "text":
-                                getattr(
-                                    review,
-                                    "text",
-                                    ""
-                                ),
-
-                            "review_text":
-                                getattr(
-                                    review,
-                                    "text",
-                                    ""
-                                ),
-
-                            "created_at":
-                                created_at,
-
-                            "relative_time_description":
-                                created_at,
-
-                            "review_likes":
-                                getattr(
-                                    review,
-                                    "review_likes",
-                                    0
-                                ),
-
-                            "sentiment":
-                                (
-                                    "positive"
-                                    if getattr(
-                                        review,
-                                        "rating",
-                                        0
-                                    ) >= 4
-
-                                    else "negative"
-
-                                    if getattr(
-                                        review,
-                                        "rating",
-                                        0
-                                    ) <= 2
-
-                                    else "neutral"
-                                )
-                        })
-
-                    except Exception as row_error:
-
-                        logger.error(
-                            f"❌ Review formatting failed: {row_error}"
-                        )
-
-                        continue
+                    })
 
                 logger.info(
                     f"✅ Loaded {len(formatted_reviews)} reviews from PostgreSQL"
@@ -676,13 +853,13 @@ class ReviewService:
             except Exception as e:
 
                 logger.exception(
-                    "❌ Failed loading reviews from PostgreSQL"
+                    "❌ Failed loading reviews"
                 )
 
                 return []
 
     # ======================================================
-    # INGEST REVIEWS INTO POSTGRESQL
+    # INGEST GOOGLE REVIEWS
     # ======================================================
 
     @staticmethod
@@ -730,7 +907,7 @@ class ReviewService:
                         session,
 
                     target_limit=
-                        3000
+                        300
                 )
 
                 if not reviews:
@@ -741,9 +918,11 @@ class ReviewService:
 
                     return {
 
-                        "status": "success",
+                        "status":
+                            "success",
 
-                        "ingested_count": 0
+                        "ingested_count":
+                            0
                     }
 
                 ingested_count = 0
@@ -777,41 +956,6 @@ class ReviewService:
                             skipped_existing += 1
                             continue
 
-                        author_name = (
-                            item.get(
-                                "author_name"
-                            )
-                            or "Anonymous"
-                        )
-
-                        rating = (
-                            item.get(
-                                "rating"
-                            )
-                            or 5
-                        )
-
-                        text = (
-                            item.get(
-                                "text"
-                            )
-                            or ""
-                        )
-
-                        review_time = (
-                            item.get(
-                                "google_review_time"
-                            )
-                            or utc_now_naive()
-                        )
-
-                        review_likes = (
-                            item.get(
-                                "review_likes"
-                            )
-                            or 0
-                        )
-
                         new_review = Review(
 
                             company_id=
@@ -823,22 +967,37 @@ class ReviewService:
                                 ),
 
                             author_name=
-                                author_name,
+                                item.get(
+                                    "author_name",
+                                    "Anonymous"
+                                ),
 
                             rating=
-                                rating,
+                                item.get(
+                                    "rating",
+                                    5
+                                ),
 
                             text=
-                                text,
+                                item.get(
+                                    "text",
+                                    ""
+                                ),
 
                             google_review_time=
-                                review_time,
+                                item.get(
+                                    "google_review_time",
+                                    utc_now_naive()
+                                ),
 
                             first_seen_at=
                                 utc_now_naive(),
 
                             review_likes=
-                                review_likes
+                                item.get(
+                                    "review_likes",
+                                    0
+                                )
                         )
 
                         session.add(new_review)
@@ -848,7 +1007,7 @@ class ReviewService:
                     except Exception as item_error:
 
                         logger.error(
-                            f"❌ Review save failed: {item_error}"
+                            f"❌ Failed saving review: {item_error}"
                         )
 
                         continue
@@ -860,7 +1019,7 @@ class ReviewService:
                 )
 
                 logger.info(
-                    f"⚠️ Existing reviews skipped: {skipped_existing}"
+                    f"⚠️ Existing skipped: {skipped_existing}"
                 )
 
                 return {
@@ -880,7 +1039,7 @@ class ReviewService:
                 await session.rollback()
 
                 logger.exception(
-                    "❌ PostgreSQL ingest failed"
+                    "❌ Ingest failed"
                 )
 
                 return {
