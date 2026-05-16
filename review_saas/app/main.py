@@ -7,7 +7,6 @@ import sys
 import traceback
 import logging
 
-
 from datetime import datetime
 from contextlib import asynccontextmanager
 
@@ -302,11 +301,11 @@ async def login_page(request: Request):
 
     return templates.TemplateResponse(
 
-        "login.html",
-
         {
             "request": request
-        }
+        },
+
+        "login.html"
     )
 
 # ==========================================================
@@ -318,11 +317,11 @@ async def register_page(request: Request):
 
     return templates.TemplateResponse(
 
-        "register.html",
-
         {
             "request": request
-        }
+        },
+
+        "register.html"
     )
 
 # ==========================================================
@@ -341,8 +340,6 @@ async def dashboard_page(request: Request):
 
     return templates.TemplateResponse(
 
-        "dashboard.html",
-
         {
 
             "request": request,
@@ -358,7 +355,9 @@ async def dashboard_page(request: Request):
                 "email":
                     request.session.get("user_email")
             }
-        }
+        },
+
+        "dashboard.html"
     )
 
 # ==========================================================
