@@ -11,8 +11,6 @@ from contextlib import asynccontextmanager
 from fastapi import (
     FastAPI,
     Request,
-    Depends,
-    Form,
 )
 
 from fastapi.middleware.cors import (
@@ -37,16 +35,6 @@ from starlette.staticfiles import (
     StaticFiles
 )
 
-from sqlalchemy.ext.asyncio import (
-    AsyncSession
-)
-
-from sqlalchemy.future import select
-
-from passlib.context import (
-    CryptContext
-)
-
 from loguru import logger
 
 # ==========================================================
@@ -57,7 +45,6 @@ from app.core.config import settings
 
 from app.core.db import (
     init_models,
-    get_db,
 )
 
 # ==========================================================
@@ -76,11 +63,6 @@ logger.add(
 
 logging.basicConfig(
     level=logging.INFO
-)
-
-pwd_context = CryptContext(
-    schemes=["bcrypt"],
-    deprecated="auto"
 )
 
 # ==========================================================
@@ -172,7 +154,7 @@ async def global_exception_handler(
     )
 
 # ==========================================================
-# MIDDLEWARE
+# CORS MIDDLEWARE
 # ==========================================================
 
 app.add_middleware(
@@ -188,6 +170,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ==========================================================
+# SESSION MIDDLEWARE
+# ==========================================================
+
 app.add_middleware(
 
     SessionMiddleware,
@@ -201,7 +187,6 @@ app.add_middleware(
     same_site="none",
 
     https_only=True
-)
 )
 
 # ==========================================================
@@ -381,7 +366,7 @@ async def root(
     request: Request
 ):
 
-    if not request.session.get("user"):
+    if not request.session.get("user_id"):
 
         return RedirectResponse(
             "/login",
@@ -412,8 +397,6 @@ async def login_page(
 
         name="login.html"
     )
-
-# ==========================================================
 
 # ==========================================================
 # REGISTER PAGE
@@ -448,7 +431,7 @@ async def dashboard_view(
     request: Request
 ):
 
-    if not request.session.get("user"):
+    if not request.session.get("user_id"):
 
         return RedirectResponse(
             "/login",
@@ -463,8 +446,17 @@ async def dashboard_view(
 
         context={
 
-            "user":
-                request.session.get("user")
+            "user": {
+
+                "id":
+                    request.session.get("user_id"),
+
+                "name":
+                    request.session.get("user_name"),
+
+                "email":
+                    request.session.get("user_email")
+            }
         }
     )
 
@@ -480,6 +472,10 @@ async def logout(
 ):
 
     request.session.clear()
+
+    logger.info(
+        "✅ User logged out"
+    )
 
     return RedirectResponse(
 
