@@ -98,9 +98,9 @@ GROQ_API_KEY = os.getenv(
 )
 
 if not GROQ_API_KEY:
-logger.error(
-"❌ GROQ_API_KEY missing"
-)
+    logger.error(
+        "❌ GROQ_API_KEY missing"
+    )
 
 # ==========================================================
 
