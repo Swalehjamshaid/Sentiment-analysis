@@ -168,7 +168,7 @@ text = re.sub(
 )
 
 return text.strip()
-```
+
 
 # ==========================================================
 
@@ -178,7 +178,7 @@ return text.strip()
 
 def analyze_sentiment(text: str):
 
-```
+
 try:
 
     score = sentiment_analyzer.polarity_scores(text)
@@ -200,7 +200,7 @@ except Exception as e:
     )
 
     return "Neutral"
-```
+
 
 # ==========================================================
 
@@ -210,7 +210,6 @@ except Exception as e:
 
 def detect_emotion(text: str):
 
-```
 text = text.lower()
 
 emotions = {
@@ -255,7 +254,7 @@ for emotion, words in emotions.items():
         return emotion
 
 return "Neutral"
-```
+
 
 # ==========================================================
 
@@ -265,7 +264,7 @@ return "Neutral"
 
 def categorize_issue(text: str):
 
-```
+
 text = text.lower()
 
 categories = {
@@ -311,7 +310,7 @@ for category, words in categories.items():
         return category
 
 return "General"
-```
+
 
 # ==========================================================
 
@@ -321,7 +320,7 @@ return "General"
 
 def detect_keywords(reviews: List[str]):
 
-```
+
 issue_words = [
 
     "late",
@@ -353,7 +352,7 @@ for review in reviews:
             keywords.append(word)
 
 return Counter(keywords).most_common(10)
-```
+
 
 # ==========================================================
 
@@ -367,7 +366,7 @@ query,
 reviews
 ):
 
-```
+
 try:
 
     cache_key = f"semantic_{company_id}_{query}"
@@ -439,7 +438,7 @@ except Exception as e:
     )
 
     return []
-```
+
 
 # ==========================================================
 
@@ -449,7 +448,7 @@ except Exception as e:
 
 def generate_action_plans(keywords):
 
-```
+
 actions = []
 
 for issue, count in keywords:
@@ -513,7 +512,7 @@ for issue, count in keywords:
         })
 
 return actions
-```
+
 
 # ==========================================================
 
@@ -526,7 +525,7 @@ avg_rating,
 negative_reviews
 ):
 
-```
+
 score = (
     (avg_rating / 5) * 100
 ) - (negative_reviews * 1.2)
@@ -534,7 +533,7 @@ score = (
 score = max(0, min(100, score))
 
 return round(score, 2)
-```
+
 
 # ==========================================================
 
@@ -547,7 +546,7 @@ negative_reviews,
 total_reviews
 ):
 
-```
+
 if total_reviews == 0:
     return 0
 
@@ -556,7 +555,7 @@ risk = (
 ) * 100
 
 return round(risk, 2)
-```
+
 
 # ==========================================================
 
@@ -566,7 +565,7 @@ return round(risk, 2)
 
 def calculate_confidence(similarities):
 
-```
+
 if not similarities:
     return 75
 
@@ -576,7 +575,7 @@ return round(
     min(99, max(70, avg * 100)),
     2
 )
-```
+
 
 # ==========================================================
 
@@ -586,16 +585,16 @@ return round(
 
 def generate_executive_insights(
 
-```
+
 avg_rating,
 reputation_score,
 revenue_risk,
 negative_count
-```
+
 
 ):
 
-```
+
 insights = []
 
 if avg_rating < 3.5:
@@ -629,7 +628,7 @@ if not insights:
     )
 
 return insights
-```
+
 
 # ==========================================================
 
@@ -642,7 +641,7 @@ reviews,
 limit=120
 ):
 
-```
+
 positive = []
 negative = []
 neutral = []
@@ -674,7 +673,7 @@ selected = (
 )
 
 return selected[:limit]
-```
+
 
 # ==========================================================
 
@@ -684,7 +683,7 @@ return selected[:limit]
 
 def build_response_instruction(response_mode):
 
-```
+
 if response_mode == "SHORT_MODE":
 
     return (
@@ -724,7 +723,7 @@ elif response_mode == "RECOMMENDATION_MODE":
 return (
     "Respond naturally, conversationally, and professionally."
 )
-```
+
 
 # ==========================================================
 
@@ -736,17 +735,17 @@ return (
 
 async def chatbot_api(
 
-```
+
 request: Request,
 
 session: AsyncSession = Depends(
     get_session
 )
-```
+
 
 ):
 
-```
+
 start_time = time.time()
 
 try:
@@ -1078,7 +1077,7 @@ try:
     # ==================================================
 
     prompt = f"""
-```
+
 
 You are a world-class enterprise AI business advisor.
 
@@ -1183,7 +1182,7 @@ RULES
 
 """
 
-```
+
     # ==================================================
     # AI RESPONSE
     # ==================================================
@@ -1389,4 +1388,4 @@ except Exception as e:
             f"Enterprise AI Error: {str(e)}"
 
     }, status_code=500)
-```
+
