@@ -31,17 +31,41 @@ from app.services.memory_service import memory_service
 from app.services.cache_service import cache_service
 from app.services.response_formatter import response_formatter
 
+# ==========================================================
+
+# LOGGER
+
+# ==========================================================
+
 logger = logging.getLogger(**name**)
+
+# ==========================================================
+
+# ROUTER
+
+# ==========================================================
 
 router = APIRouter(
 prefix="/chatbot",
 tags=["Enterprise AI Chatbot"]
 )
 
+# ==========================================================
+
+# ENVIRONMENT
+
+# ==========================================================
+
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 if not GROQ_API_KEY:
-logger.error("❌ GROQ_API_KEY missing")
+logger.warning("GROQ_API_KEY is missing")
+
+# ==========================================================
+
+# CLIENTS
+
+# ==========================================================
 
 client = Groq(api_key=GROQ_API_KEY)
 
@@ -65,11 +89,7 @@ text = text.lower()
 
 text = re.sub(r"http\S+", "", text)
 
-text = re.sub(
-    r"[^a-zA-Z0-9\s]",
-    " ",
-    text
-)
+text = re.sub(r"[^a-zA-Z0-9\s]", " ", text)
 
 text = re.sub(r"\s+", " ", text)
 
@@ -82,7 +102,7 @@ return text.strip()
 
 # ==========================================================
 
-def analyze_sentiment(text: str):
+def analyze_sentiment(text: str) -> str:
 
 ```
 try:
@@ -94,34 +114,34 @@ try:
     if compound >= 0.2:
         return "Positive"
 
-    elif compound <= -0.2:
+    if compound <= -0.2:
         return "Negative"
 
     return "Neutral"
 
-except Exception as e:
+except Exception as error:
 
-    logger.error(f"❌ Sentiment Error: {e}")
+    logger.error(f"Sentiment error: {error}")
 
     return "Neutral"
 ```
 
 # ==========================================================
 
-# EMOTION DETECTION
+# EMOTION
 
 # ==========================================================
 
-def detect_emotion(text: str):
+def detect_emotion(text: str) -> str:
 
 ```
 text = text.lower()
 
 emotions = {
-    "Anger": ["worst", "hate", "awful", "terrible", "fraud", "rude"],
-    "Frustration": ["late", "delay", "problem", "issue", "slow"],
-    "Satisfaction": ["great", "excellent", "perfect", "amazing", "good"],
-    "Disappointment": ["bad", "poor", "broken", "damaged"]
+    "Anger": ["worst", "hate", "terrible", "awful", "fraud"],
+    "Frustration": ["delay", "late", "problem", "slow"],
+    "Satisfaction": ["great", "excellent", "perfect", "good"],
+    "Disappointment": ["poor", "bad", "broken", "damaged"]
 }
 
 for emotion, words in emotions.items():
@@ -134,21 +154,21 @@ return "Neutral"
 
 # ==========================================================
 
-# ISSUE CATEGORY
+# CATEGORY
 
 # ==========================================================
 
-def categorize_issue(text: str):
+def categorize_issue(text: str) -> str:
 
 ```
 text = text.lower()
 
 categories = {
-    "Delivery Issues": ["delivery", "late", "delay", "shipment"],
-    "Staff Behavior": ["staff", "employee", "rude", "attitude"],
-    "Product Quality": ["quality", "broken", "damaged", "poor"],
-    "Customer Support": ["support", "refund", "response"],
-    "Pricing Issues": ["price", "expensive", "cost"]
+    "Delivery": ["delivery", "late", "delay"],
+    "Support": ["support", "refund", "response"],
+    "Quality": ["quality", "broken", "damaged"],
+    "Staff": ["staff", "employee", "rude"],
+    "Pricing": ["price", "cost", "expensive"]
 }
 
 for category, words in categories.items():
@@ -183,7 +203,6 @@ issue_words = [
     "issue",
     "problem",
     "rude",
-    "fraud",
     "expensive"
 ]
 
@@ -205,7 +224,7 @@ return Counter(keywords).most_common(10)
 
 # ==========================================================
 
-def semantic_search(company_id, query, reviews):
+def semantic_search(query: str, reviews: List[Review]):
 
 ```
 try:
@@ -221,7 +240,7 @@ try:
 
     vectorizer = TfidfVectorizer(
         stop_words="english",
-        max_features=2500
+        max_features=2000
     )
 
     vectors = vectorizer.fit_transform(
@@ -248,32 +267,32 @@ try:
 
     return results
 
-except Exception as e:
+except Exception as error:
 
-    logger.error(f"❌ Semantic Error: {e}")
+    logger.error(f"Semantic search error: {error}")
 
     return []
 ```
 
 # ==========================================================
 
-# RESPONSE STYLE
+# RESPONSE MODE
 
 # ==========================================================
 
-def build_response_instruction(response_mode):
+def build_response_instruction(response_mode: str) -> str:
 
 ```
 if response_mode == "SHORT_MODE":
-    return "Respond in short natural sentences only."
+    return "Respond briefly and naturally."
 
-elif response_mode == "BULLET_MODE":
-    return "Respond in bullet points only."
+if response_mode == "BULLET_MODE":
+    return "Respond using concise bullet points."
 
-elif response_mode == "EXECUTIVE_MODE":
-    return "Provide executive-level business analysis."
+if response_mode == "EXECUTIVE_MODE":
+    return "Provide executive-level strategic analysis."
 
-return "Respond naturally and professionally."
+return "Respond professionally and conversationally."
 ```
 
 # ==========================================================
@@ -299,10 +318,7 @@ try:
 
     user_message = body.get("message", "").strip()
 
-    session_id = body.get(
-        "session_id",
-        "default_session"
-    )
+    session_id = body.get("session_id", "default_session")
 
     if not company_id:
         return JSONResponse({
@@ -316,9 +332,7 @@ try:
             "answer": "Please enter a message."
         })
 
-    routing_data = intent_router.detect_intent(
-        user_message
-    )
+    routing_data = intent_router.detect_intent(user_message)
 
     response_mode = routing_data.get(
         "response_mode",
@@ -338,11 +352,11 @@ try:
         cached_response["cached"] = True
         return JSONResponse(cached_response)
 
-    company_stmt = select(Company).where(
+    company_query = select(Company).where(
         Company.id == int(company_id)
     )
 
-    company_result = await session.execute(company_stmt)
+    company_result = await session.execute(company_query)
 
     company = company_result.scalar_one_or_none()
 
@@ -352,23 +366,13 @@ try:
             "answer": "Company not found."
         })
 
-    previous_context = memory_service.build_context(
-        session_id=session_id,
-        limit=6
-    )
-
-    contextual_query = memory_service.build_contextual_query(
-        session_id=session_id,
-        current_query=user_message
-    )
-
-    review_stmt = (
+    review_query = (
         select(Review)
         .where(Review.company_id == int(company_id))
         .limit(150)
     )
 
-    review_result = await session.execute(review_stmt)
+    review_result = await session.execute(review_query)
 
     reviews = review_result.scalars().all()
 
@@ -378,9 +382,18 @@ try:
             "answer": "No reviews available."
         })
 
+    previous_context = memory_service.build_context(
+        session_id=session_id,
+        limit=5
+    )
+
+    contextual_query = memory_service.build_contextual_query(
+        session_id=session_id,
+        current_query=user_message
+    )
+
     semantic_results = await run_in_threadpool(
         semantic_search,
-        company.id,
         contextual_query,
         reviews
     )
@@ -392,8 +405,18 @@ try:
     ]
 
     sentiments = [
-        analyze_sentiment(x)
-        for x in review_texts
+        analyze_sentiment(text)
+        for text in review_texts
+    ]
+
+    emotions = [
+        detect_emotion(text)
+        for text in review_texts
+    ]
+
+    categories = [
+        categorize_issue(text)
+        for text in review_texts
     ]
 
     positive_count = sentiments.count("Positive")
@@ -402,15 +425,20 @@ try:
 
     top_keywords = detect_keywords(review_texts)
 
-    avg_rating = round(
-        sum(r.rating for r in reviews if r.rating) /
-        max(1, len([r for r in reviews if r.rating])),
+    top_emotions = Counter(emotions).most_common(5)
+
+    top_categories = Counter(categories).most_common(5)
+
+    ratings = [r.rating for r in reviews if r.rating]
+
+    average_rating = round(
+        sum(ratings) / max(1, len(ratings)),
         2
     )
 
     similar_reviews = "\n".join([
-        f"- {x['text'][:220]}"
-        for x in semantic_results[:5]
+        f"- {item['text'][:220]}"
+        for item in semantic_results
     ])
 
     prompt = f"""
@@ -425,7 +453,7 @@ COMPANY:
 {company.name}
 
 AVERAGE RATING:
-{avg_rating}
+{average_rating}
 
 POSITIVE REVIEWS:
 {positive_count}
@@ -438,6 +466,12 @@ NEUTRAL REVIEWS:
 
 TOP ISSUES:
 {top_keywords}
+
+TOP CATEGORIES:
+{top_categories}
+
+TOP EMOTIONS:
+{top_emotions}
 
 PREVIOUS CONTEXT:
 {previous_context}
@@ -458,7 +492,7 @@ Respond naturally and professionally.
             messages=[
                 {
                     "role": "system",
-                    "content": "You are a human-like enterprise AI advisor."
+                    "content": "You are a highly intelligent enterprise AI advisor."
                 },
                 {
                     "role": "user",
@@ -477,16 +511,26 @@ Respond naturally and professionally.
         routing_data=routing_data
     )
 
-    memory = ChatHistory(
+    chat_memory = ChatHistory(
         session_id=session_id,
         company_id=company.id,
         user_message=user_message,
         ai_response=answer
     )
 
-    session.add(memory)
+    session.add(chat_memory)
 
     await session.commit()
+
+    memory_service.add_memory(
+        session_id=session_id,
+        user_message=user_message,
+        ai_response=answer,
+        metadata={
+            "company_id": company_id,
+            "mode": response_mode
+        }
+    )
 
     processing_time = round(
         time.time() - start_time,
@@ -496,11 +540,13 @@ Respond naturally and professionally.
     final_response = {
         "success": True,
         "company": company.name,
-        "average_rating": avg_rating,
+        "average_rating": average_rating,
         "positive_reviews": positive_count,
         "negative_reviews": negative_count,
         "neutral_reviews": neutral_count,
         "top_issues": top_keywords,
+        "top_categories": top_categories,
+        "top_emotions": top_emotions,
         "semantic_matches": semantic_results,
         "response_mode": response_mode,
         "processing_time": processing_time,
@@ -516,12 +562,12 @@ Respond naturally and professionally.
 
     return JSONResponse(final_response)
 
-except Exception as e:
+except Exception as error:
 
-    logger.error(f"🔥 Chatbot Error: {e}")
+    logger.error(f"Enterprise chatbot error: {error}")
 
     return JSONResponse({
         "success": False,
-        "answer": f"Enterprise AI Error: {str(e)}"
+        "answer": f"Enterprise AI Error: {str(error)}"
     }, status_code=500)
 ```
