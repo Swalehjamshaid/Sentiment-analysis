@@ -19,7 +19,7 @@ itsdangerous==2.2.0
 # PYDANTIC & SETTINGS
 # ==========================================================
 
-pydantic==2.8.2
+pydantic==2.11.4
 pydantic-settings==2.4.0
 pydantic-ai-slim==0.0.12
 typing-extensions>=4.12.2
