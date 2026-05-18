@@ -37,7 +37,7 @@ from app.services.response_formatter import response_formatter
 
 # ==========================================================
 
-logger = logging.getLogger(**name**)
+logger = logging.getLogger(__name__)
 
 # ==========================================================
 
