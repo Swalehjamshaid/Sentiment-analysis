@@ -1,7 +1,7 @@
 # ==========================================================
-# WORLD-CLASS PRODUCTION SCRAPER
+# TRUSTLYTICS - PRODUCTION REVIEW SCRAPER
 # FASTAPI + PLAYWRIGHT + APIFY + GOOGLE MAPS
-# ULTRA OPTIMIZED FOR RAILWAY + PROXIES
+# OPTIMIZED FOR RAILWAY + DATAIMPULSE PROXIES
 # ==========================================================
 
 import os
@@ -10,10 +10,10 @@ import json
 import asyncio
 import logging
 import random
-import requests
-
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import Optional
+
+import requests
 
 from apify_client import ApifyClient
 
@@ -37,7 +37,7 @@ from app.core.models import (
 logger = logging.getLogger("app.scraper")
 
 # ==========================================================
-# ENV VARIABLES
+# ENVIRONMENT VARIABLES
 # ==========================================================
 
 APIFY_API_TOKEN = os.getenv(
@@ -68,7 +68,7 @@ USE_PROXY_SCRAPER_FIRST = (
 )
 
 # ==========================================================
-# APIFY
+# APIFY CLIENT
 # ==========================================================
 
 apify_client = ApifyClient(
@@ -79,7 +79,7 @@ apify_client = ApifyClient(
 # HELPERS
 # ==========================================================
 
-def utc_now_naive() -> datetime:
+def utc_now_naive():
 
     return datetime.utcnow().replace(
         tzinfo=None
@@ -90,12 +90,10 @@ def safe_int(value, default=0):
     try:
         return int(value)
 
-    except:
+    except Exception:
         return default
 
-def safe_parse_iso_datetime(
-    date_str
-):
+def safe_parse_iso_datetime(date_str):
 
     if not date_str:
         return utc_now_naive()
@@ -113,7 +111,8 @@ def safe_parse_iso_datetime(
             tzinfo=None
         )
 
-    except:
+    except Exception:
+
         return utc_now_naive()
 
 # ==========================================================
@@ -147,14 +146,14 @@ def build_proxy_config():
     return proxy
 
 # ==========================================================
-# BLOCK RESOURCES
+# BLOCK HEAVY RESOURCES
 # ==========================================================
 
 async def block_resources(route):
 
     resource_type = route.request.resource_type
 
-    blocked = [
+    blocked_resources = [
 
         "image",
         "media",
@@ -163,7 +162,7 @@ async def block_resources(route):
         "websocket"
     ]
 
-    if resource_type in blocked:
+    if resource_type in blocked_resources:
 
         await route.abort()
 
@@ -187,9 +186,7 @@ async def parse_review_card(card, idx):
         text = ""
         rating = 5
 
-        # ==================================================
         # AUTHOR
-        # ==================================================
 
         try:
 
@@ -200,17 +197,13 @@ async def parse_review_card(card, idx):
             if await author_locator.count() > 0:
 
                 author = (
-                    await author_locator
-                    .first
-                    .inner_text()
+                    await author_locator.first.inner_text()
                 ).strip()
 
-        except:
+        except Exception:
             pass
 
-        # ==================================================
         # RATING
-        # ==================================================
 
         try:
 
@@ -230,16 +223,15 @@ async def parse_review_card(card, idx):
                 )
 
                 if match:
+
                     rating = int(
                         match.group(1)
                     )
 
-        except:
+        except Exception:
             pass
 
-        # ==================================================
         # REVIEW TEXT
-        # ==================================================
 
         try:
 
@@ -250,12 +242,10 @@ async def parse_review_card(card, idx):
             if await text_locator.count() > 0:
 
                 text = (
-                    await text_locator
-                    .first
-                    .inner_text()
+                    await text_locator.first.inner_text()
                 ).strip()
 
-        except:
+        except Exception:
             pass
 
         return {
@@ -282,13 +272,13 @@ async def parse_review_card(card, idx):
     except Exception as e:
 
         logger.error(
-            f"❌ Review parse failed: {e}"
+            f"❌ Review parsing failed: {e}"
         )
 
         return None
 
 # ==========================================================
-# PLAYWRIGHT SCRAPER
+# PLAYWRIGHT + CRAWLEE SCRAPER
 # ==========================================================
 
 async def fetch_reviews_with_crawlee(
@@ -300,7 +290,7 @@ async def fetch_reviews_with_crawlee(
 ):
 
     logger.info(
-        "🚀 Starting Crawlee Scraper"
+        "🚀 Starting Crawlee scraper"
     )
 
     reviews = []
@@ -333,6 +323,13 @@ async def fetch_reviews_with_crawlee(
     if proxy_config:
         launch_options["proxy"] = proxy_config
 
+    # IMPORTANT:
+    # DO NOT USE:
+    # max_concurrency
+    # request_handler_timeout
+    # because your installed Crawlee version
+    # does not support them.
+
     crawler = PlaywrightCrawler(
 
         headless=True,
@@ -355,22 +352,27 @@ async def fetch_reviews_with_crawlee(
                 f"🌐 Opening URL: {google_maps_url}"
             )
 
-            # ==============================================
+            # ==================================================
             # BLOCK HEAVY RESOURCES
-            # ==============================================
+            # ==================================================
 
             await page.route(
                 "**/*",
                 block_resources
             )
 
-            # ==============================================
-            # OPEN PAGE
-            # ==============================================
+            # ==================================================
+            # OPEN GOOGLE MAPS
+            # ==================================================
 
             await page.goto(
 
                 google_maps_url,
+
+                # IMPORTANT:
+                # NEVER use:
+                # wait_until="load"
+                # wait_until="networkidle"
 
                 wait_until="domcontentloaded",
 
@@ -384,9 +386,9 @@ async def fetch_reviews_with_crawlee(
                 )
             )
 
-            # ==============================================
+            # ==================================================
             # OPEN REVIEWS PANEL
-            # ==============================================
+            # ==================================================
 
             try:
 
@@ -411,15 +413,19 @@ async def fetch_reviews_with_crawlee(
                     f"⚠️ Failed opening reviews panel: {review_button_error}"
                 )
 
-            # ==============================================
-            # SCROLL REVIEWS
-            # ==============================================
+            # ==================================================
+            # REVIEW CONTAINER
+            # ==================================================
 
             review_cards = page.locator(
                 'div[data-review-id]'
             )
 
             previous_count = 0
+
+            # ==================================================
+            # SCROLL REVIEWS
+            # ==================================================
 
             for _ in range(12):
 
@@ -464,12 +470,12 @@ async def fetch_reviews_with_crawlee(
                 )
             ]
 
-            parsed = await asyncio.gather(
+            parsed_results = await asyncio.gather(
                 *tasks
             )
 
             reviews.extend([
-                r for r in parsed if r
+                r for r in parsed_results if r
             ])
 
         except Exception as e:
@@ -501,7 +507,7 @@ async def fetch_reviews_from_apify(
 ):
 
     logger.info(
-        "⚡ Starting APIFY"
+        "⚡ Starting APIFY scraper"
     )
 
     fetch_limit = target_limit + 20
@@ -693,9 +699,9 @@ async def fetch_reviews_from_google(
 
     try:
 
-        # ==============================================
+        # ==================================================
         # EXISTING IDS
-        # ==============================================
+        # ==================================================
 
         if session and company_id:
 
@@ -734,9 +740,9 @@ async def fetch_reviews_from_google(
                     or company.google_place_id
                 )
 
-        # ==============================================
+        # ==================================================
         # VALIDATE PLACE ID
-        # ==============================================
+        # ==================================================
 
         if not place_id:
 
@@ -754,9 +760,9 @@ async def fetch_reviews_from_google(
             f"📍 URL: {google_maps_url}"
         )
 
-        # ==============================================
+        # ==================================================
         # APIFY FIRST
-        # ==============================================
+        # ==================================================
 
         try:
 
@@ -847,9 +853,9 @@ async def fetch_reviews_from_google(
                 f"❌ APIFY failed: {apify_error}"
             )
 
-        # ==============================================
+        # ==================================================
         # PLAYWRIGHT FALLBACK
-        # ==============================================
+        # ==================================================
 
         if USE_PROXY_SCRAPER_FIRST:
 
@@ -876,9 +882,9 @@ async def fetch_reviews_from_google(
                     f"❌ Crawlee error: {crawlee_error}"
                 )
 
-        # ==============================================
+        # ==================================================
         # SERPER FINAL FALLBACK
-        # ==============================================
+        # ==================================================
 
         return await fetch_from_serper_fallback(
 
