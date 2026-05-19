@@ -864,19 +864,11 @@ async def fetch_reviews_from_google(
             google_maps_url=
                 google_maps_url,
 
-            target_limit=
-                dynamic_target_limit
-        )
-
-        logger.info(
-            f"🚀 Requesting {dynamic_target_limit} reviews from APIFY"
-        )
-
-        logger.info(
+            target_limit=        logger.info(
             "🚀 Starting APIFY actor..."
         )
 
-                     run = await asyncio.to_thread(
+        run = await asyncio.to_thread(
             client.actor(
                 "compass~google-maps-reviews-scraper"
             ).call,
@@ -884,6 +876,29 @@ async def fetch_reviews_from_google(
         )
 
         if not run:
+
+            logger.error(
+                "❌ Actor execution failed"
+            )
+
+            return {
+
+                "success": False,
+
+                "inserted": 0,
+
+                "updated": 0,
+
+                "duplicates": 0,
+
+                "fetched": 0,
+
+                "reviews": []
+            }
+                dynamic_target_limit
+        )
+
+        
 
             logger.error(
                 "❌ Actor execution failed"
@@ -939,11 +954,11 @@ async def fetch_reviews_from_google(
         # WAIT FOR DATASET READINESS
         # ==================================================
 
-        for attempt in range(10):
+                for attempt in range(10):
 
             try:
 
-                                           dataset_items = await asyncio.to_thread(
+                dataset_items = await asyncio.to_thread(
                     dataset.list_items,
                     clean=True,
                     limit=dynamic_target_limit
@@ -954,6 +969,7 @@ async def fetch_reviews_from_google(
                 logger.info(
                     f"📦 RAW REVIEWS RECEIVED: {len(raw_reviews)}"
                 )
+
                 if raw_reviews:
 
                     logger.info(
@@ -972,6 +988,9 @@ async def fetch_reviews_from_google(
 
         if not raw_reviews:
 
+            logger.warning(
+                "⚠️ No reviews returned from APIFY"
+            )
             logger.warning(
                 "⚠️ No reviews returned from APIFY"
             )
