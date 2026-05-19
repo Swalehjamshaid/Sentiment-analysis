@@ -1,18 +1,16 @@
 # ==========================================
-# REVIEW INTEL AI — COMPLETE RAILWAY DOCKERFILE
-# PLAYWRIGHT + FASTAPI + RAILWAY OPTIMIZED
+# REVIEW INTEL AI — RAILWAY PRODUCTION DOCKERFILE
+# FASTAPI + PLAYWRIGHT + POSTGRESQL
 # ==========================================
+
 FROM python:3.11-slim
+
 # ==========================================
 # PYTHON SETTINGS
 # ==========================================
-# Prevent Python from writing pyc files
+
 ENV PYTHONDONTWRITEBYTECODE=1
-
-# Prevent Python buffering logs
 ENV PYTHONUNBUFFERED=1
-
-# Playwright browser path
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 # ==========================================
@@ -65,10 +63,14 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt .
 
 # ==========================================
-# INSTALL PYTHON PACKAGES
+# UPGRADE PIP
 # ==========================================
 
 RUN pip install --upgrade pip
+
+# ==========================================
+# INSTALL PYTHON PACKAGES
+# ==========================================
 
 RUN pip install --no-cache-dir -r requirements.txt
 
