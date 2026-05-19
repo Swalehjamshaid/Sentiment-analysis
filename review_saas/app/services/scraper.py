@@ -1136,6 +1136,19 @@ async def fetch_reviews_from_google(
 
                 inserted_count += 1
 
+                # ======================================
+                # HARD INSERT LIMIT
+                # ======================================
+
+                if inserted_count >= target_limit:
+
+                    logger.info(
+                        f"🛑 Target insert limit reached: {target_limit}"
+                    )
+
+                    break
+            
+
             except Exception as row_error:
 
                 logger.exception(
