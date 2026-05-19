@@ -240,10 +240,10 @@ async def ingest_reviews(
             )
 
         place_id = getattr(
-            company,
-            "place_id",
-            None
-        )
+    company,
+    "google_place_id",
+    None
+)
 
         if not place_id:
 
