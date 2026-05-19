@@ -2,13 +2,10 @@
 # REVIEW INTEL AI — COMPLETE RAILWAY DOCKERFILE
 # PLAYWRIGHT + FASTAPI + RAILWAY OPTIMIZED
 # ==========================================
-
 FROM python:3.11-slim
-
 # ==========================================
 # PYTHON SETTINGS
 # ==========================================
-
 # Prevent Python from writing pyc files
 ENV PYTHONDONTWRITEBYTECODE=1
 
