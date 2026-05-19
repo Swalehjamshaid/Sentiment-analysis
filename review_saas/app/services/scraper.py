@@ -1,24 +1,25 @@
 # ==========================================================
 # FILE: app/services/scraper.py
-# TRUSTLYTICS AI SAAS - FINAL ENTERPRISE SCRAPER
+# TRUSTLYTICS AI SAAS - ENTERPRISE APIFY SCRAPER
 # ==========================================================
 #
-# FEATURES
+# FULL FEATURES
 # ----------------------------------------------------------
-# ✅ APIFY GOOGLE REVIEWS SCRAPER
-# ✅ PostgreSQL Integration
-# ✅ Dashboard Compatible
-# ✅ Async SQLAlchemy
+# ✅ APIFY Google Maps Reviews Scraper
+# ✅ PostgreSQL Database Integration
+# ✅ FastAPI Compatible
+# ✅ Async SQLAlchemy Support
+# ✅ Dashboard Integration
 # ✅ Duplicate Protection
 # ✅ Existing Review Comparison
+# ✅ AI Chatbot Compatible
+# ✅ Sentiment Analysis
 # ✅ Review Persistence
 # ✅ Railway Compatible
-# ✅ FastAPI Compatible
-# ✅ AI Chatbot Compatible
-# ✅ Sentiment Scoring
-# ✅ Structured Logging
-# ✅ Safe Parsing
-# ✅ Production Ready
+# ✅ Production Logging
+# ✅ Error Recovery
+# ✅ Review Normalization
+# ✅ Enterprise Architecture
 #
 # ==========================================================
 
@@ -47,14 +48,14 @@ logger = logging.getLogger(
 )
 
 # ==========================================================
-# REVIEW SERVICE
+# REVIEW SERVICE PLACEHOLDER
 # ==========================================================
 
 class ReviewService:
     pass
 
 # ==========================================================
-# SAFE HELPERS
+# SAFE STRING
 # ==========================================================
 
 def safe_string(
@@ -67,11 +68,7 @@ def safe_string(
         if value is None:
             return default
 
-        value = str(value)
-
-        value = value.strip()
-
-        return value
+        return str(value).strip()
 
     except Exception:
 
@@ -191,7 +188,7 @@ def clean_review_text(text):
     return text
 
 # ==========================================================
-# HASH GENERATOR
+# GENERATE HASH
 # ==========================================================
 
 def generate_hash(
@@ -210,7 +207,7 @@ def generate_hash(
     ).hexdigest()
 
 # ==========================================================
-# APIFY CLIENT
+# CREATE APIFY CLIENT
 # ==========================================================
 
 def create_apify_client():
@@ -224,13 +221,13 @@ def create_apify_client():
     if not token:
 
         raise ValueError(
-            "❌ APIFY_TOKEN missing"
+            "❌ APIFY_TOKEN missing in environment"
         )
 
     return ApifyClient(token)
 
 # ==========================================================
-# GOOGLE MAPS URL
+# BUILD GOOGLE MAPS URL
 # ==========================================================
 
 def build_google_maps_url(
@@ -243,7 +240,7 @@ def build_google_maps_url(
     )
 
 # ==========================================================
-# APIFY INPUT
+# BUILD ACTOR INPUT
 # ==========================================================
 
 def build_actor_input(
@@ -500,10 +497,10 @@ def normalize_review(
         )
 
         # ==================================================
-        # NORMALIZED OBJECT
+        # RETURN NORMALIZED
         # ==================================================
 
-        normalized = {
+        return {
 
             "google_review_id":
                 google_review_id,
@@ -527,8 +524,6 @@ def normalize_review(
                 sentiment_score
         }
 
-        return normalized
-
     except Exception as e:
 
         logger.exception(
@@ -538,7 +533,7 @@ def normalize_review(
         return None
 
 # ==========================================================
-# MAIN SCRAPER FUNCTION
+# MAIN SCRAPER
 # ==========================================================
 
 async def fetch_reviews_from_google(
@@ -554,7 +549,7 @@ async def fetch_reviews_from_google(
 ) -> List[Dict[str, Any]]:
 
     logger.info(
-        f"🚀 ENTERPRISE SCRAPER STARTED | company_id={company_id}"
+        f"🚀 SCRAPER STARTED | company_id={company_id}"
     )
 
     try:
@@ -572,7 +567,7 @@ async def fetch_reviews_from_google(
             return []
 
         # ==================================================
-        # EXISTING DB REVIEWS
+        # EXISTING REVIEWS
         # ==================================================
 
         existing_ids = await get_existing_review_ids(
@@ -583,7 +578,7 @@ async def fetch_reviews_from_google(
         )
 
         logger.info(
-            f"📦 Existing DB reviews: {len(existing_ids)}"
+            f"📦 Existing reviews in DB: {len(existing_ids)}"
         )
 
         # ==================================================
@@ -605,7 +600,7 @@ async def fetch_reviews_from_google(
         )
 
         # ==================================================
-        # APIFY INPUT
+        # ACTOR INPUT
         # ==================================================
 
         actor_input = build_actor_input(
@@ -618,7 +613,7 @@ async def fetch_reviews_from_google(
         )
 
         # ==================================================
-        # RUN APIFY ACTOR
+        # RUN ACTOR
         # ==================================================
 
         logger.info(
@@ -739,7 +734,7 @@ async def fetch_reviews_from_google(
                 )
 
                 # ==========================================
-                # CREATE REVIEW OBJECT
+                # CREATE REVIEW MODEL
                 # ==========================================
 
                 new_review = Review(
@@ -776,7 +771,7 @@ async def fetch_reviews_from_google(
                 )
 
                 # ==========================================
-                # ADD TO DATABASE
+                # INSERT INTO DATABASE
                 # ==========================================
 
                 session.add(
@@ -790,7 +785,7 @@ async def fetch_reviews_from_google(
             except Exception as row_error:
 
                 logger.exception(
-                    f"❌ Row processing failed: {row_error}"
+                    f"❌ Review processing failed: {row_error}"
                 )
 
                 continue
