@@ -194,9 +194,7 @@ serpapi==0.1.5
 # SCRAPING / AUTOMATION
 # ==========================================================
 
-playwright==1.52.0
 
-playwright-stealth==1.0.6
 
 apify-client==1.8.1
 apify-shared==1.1.2
