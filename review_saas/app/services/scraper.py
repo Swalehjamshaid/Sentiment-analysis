@@ -969,7 +969,55 @@ async def fetch_reviews_from_google(
         for item in raw_reviews:
 
             try:
+                # ==========================================
+                # TIMELINE FILTERING
+                # ==========================================
 
+                review_date_raw = (
+
+                    item.get("publishedAtDate")
+
+                    or
+
+                    item.get("publishedAt")
+
+                    or
+
+                    item.get("reviewDate")
+
+                    or
+
+                    item.get("date")
+
+                    or
+
+                    item.get("reviewTime")
+                )
+
+                review_date = safe_datetime(
+                    review_date_raw
+                )
+
+                # ==========================================
+                # LAST 12 MONTHS FILTER
+                # ==========================================
+
+                months_limit = 12
+
+                current_date = datetime.utcnow()
+
+                months_difference = (
+
+                    (current_date.year - review_date.year) * 12
+
+                    +
+
+                    (current_date.month - review_date.month)
+                )
+
+                if months_difference > months_limit:
+
+                    continue
                 normalized = normalize_review(
 
                     item=item,
