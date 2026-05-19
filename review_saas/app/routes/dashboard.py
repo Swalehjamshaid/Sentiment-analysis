@@ -576,12 +576,18 @@ async def get_company_reviews(
     try:
 
         ReviewService = get_review_service()
+from app.core.db import AsyncSessionLocal
 
-        reviews = await ReviewService.get_latest_reviews(
-            company_id,
-            limit
-        )
+        async with AsyncSessionLocal() as db:
 
+            reviews = await ReviewService.get_latest_reviews(
+
+                db=db,
+
+                company_id=company_id,
+
+                limit=limit
+            )
         formatted = []
 
         for review in reviews:
@@ -675,11 +681,18 @@ async def dashboard_chat(
 
         ReviewService = get_review_service()
 
-        reviews = await ReviewService.get_latest_reviews(
-            company_id,
-            300
-        )
+        from app.core.db import AsyncSessionLocal
 
+        async with AsyncSessionLocal() as db:
+
+            reviews = await ReviewService.get_latest_reviews(
+
+                db=db,
+
+                company_id=company_id,
+
+                limit=300
+            )
         ratings = [
 
             safe_rating(r)
