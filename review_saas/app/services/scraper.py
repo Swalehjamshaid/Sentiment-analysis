@@ -2,7 +2,7 @@
 # FILE: app/services/scraper.py
 # TRUSTLYTICS AI SAAS
 # PROFESSIONAL GOOGLE MAPS REVIEW SCRAPER
-# SELENIUMBASE UC MODE + ENTERPRISE RESILIENCE
+# SELENIUMBASE UC MODE + RESIDENTIAL PROXY
 # ==========================================================
 
 import os
@@ -15,7 +15,7 @@ import logging
 import traceback
 
 from datetime import datetime
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 from tenacity import (
     retry,
@@ -389,7 +389,7 @@ def is_rate_limited(driver):
         return False
 
 # ==========================================================
-# HUMAN WARMUP
+# HUMAN SESSION WARMUP
 # ==========================================================
 
 def warmup_session(driver):
@@ -397,7 +397,7 @@ def warmup_session(driver):
     try:
 
         logger.info(
-            "🔥 WARMING GOOGLE SESSION"
+            "🔥 WARMING SESSION"
         )
 
         driver.get(
@@ -557,10 +557,6 @@ def open_reviews_panel(driver):
 
                     time.sleep(8)
 
-                    # ======================================
-                    # VERIFY FEED
-                    # ======================================
-
                     feed = driver.find_elements(
 
                         "css selector",
@@ -671,10 +667,7 @@ def extract_reviews(
                     review_text = ""
                     rating = 5
 
-                    # ======================================
                     # AUTHOR
-                    # ======================================
-
                     try:
 
                         author_elem = card.find_element(
@@ -689,10 +682,7 @@ def extract_reviews(
                     except Exception:
                         pass
 
-                    # ======================================
                     # REVIEW TEXT
-                    # ======================================
-
                     text_selectors = [
 
                         ".wiI7pd",
@@ -722,10 +712,7 @@ def extract_reviews(
                     if not review_text:
                         continue
 
-                    # ======================================
                     # RATING
-                    # ======================================
-
                     try:
 
                         rating_elem = card.find_element(
@@ -746,10 +733,7 @@ def extract_reviews(
                     except Exception:
                         pass
 
-                    # ======================================
                     # REVIEW ID
-                    # ======================================
-
                     review_id = generate_hash(
                         author,
                         review_text
@@ -792,17 +776,9 @@ def extract_reviews(
 
                 break
 
-            # ==========================================
-            # EXPAND BUTTONS
-            # ==========================================
-
             expand_review_buttons(
                 driver
             )
-
-            # ==========================================
-            # SCROLL
-            # ==========================================
 
             driver.execute_script(
                 """
@@ -877,10 +853,7 @@ async def scrape_google_reviews(
 
         driver = create_driver()
 
-        # ==============================================
-        # PROXY VERIFY
-        # ==============================================
-
+        # VERIFY PROXY
         logger.info(
             "🌐 VERIFYING PROXY"
         )
@@ -893,18 +866,12 @@ async def scrape_google_reviews(
             f"🌐 ACTIVE IP: {driver.page_source}"
         )
 
-        # ==============================================
-        # SESSION WARMUP
-        # ==============================================
-
+        # WARMUP
         warmup_session(
             driver
         )
 
-        # ==============================================
         # SEARCH NAVIGATION
-        # ==============================================
-
         search_url = build_google_maps_search_url(
             business_name
         )
@@ -919,10 +886,7 @@ async def scrape_google_reviews(
 
         time.sleep(10)
 
-        # ==============================================
         # CAPTCHA CHECK
-        # ==============================================
-
         if is_rate_limited(driver):
 
             logger.warning(
@@ -933,10 +897,7 @@ async def scrape_google_reviews(
 
             return []
 
-        # ==============================================
-        # CLICK SEARCH RESULT
-        # ==============================================
-
+        # CLICK RESULT
         clicked = click_first_search_result(
             driver
         )
@@ -947,10 +908,7 @@ async def scrape_google_reviews(
                 "⚠️ SEARCH RESULT CLICK FAILED"
             )
 
-        # ==============================================
         # OPEN REVIEWS
-        # ==============================================
-
         opened = open_reviews_panel(
             driver
         )
@@ -963,10 +921,7 @@ async def scrape_google_reviews(
 
             return []
 
-        # ==============================================
         # EXTRACT REVIEWS
-        # ==============================================
-
         reviews = extract_reviews(
 
             driver,
@@ -1071,43 +1026,35 @@ async def fetch_reviews_from_google(
 
                 review = Review(
 
-                    company_id=
-                        company_id,
+                    company_id=company_id,
 
-                    google_review_id=
-                        normalized[
-                            "google_review_id"
-                        ],
+                    google_review_id=normalized[
+                        "google_review_id"
+                    ],
 
-                    author_name=
-                        normalized[
-                            "author_name"
-                        ],
+                    author_name=normalized[
+                        "author_name"
+                    ],
 
-                    rating=
-                        normalized[
-                            "rating"
-                        ],
+                    rating=normalized[
+                        "rating"
+                    ],
 
-                    text=
-                        normalized[
-                            "text"
-                        ],
+                    text=normalized[
+                        "text"
+                    ],
 
-                    google_review_time=
-                        normalized[
-                            "google_review_time"
-                        ],
+                    google_review_time=normalized[
+                        "google_review_time"
+                    ],
 
-                    review_likes=
-                        normalized[
-                            "review_likes"
-                        ],
+                    review_likes=normalized[
+                        "review_likes"
+                    ],
 
-                    sentiment_score=
-                        normalized[
-                            "sentiment_score"
-                        ]
+                    sentiment_score=normalized[
+                        "sentiment_score"
+                    ]
                 )
 
                 session.add(review)
