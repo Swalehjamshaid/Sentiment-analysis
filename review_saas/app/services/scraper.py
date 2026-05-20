@@ -1,9 +1,9 @@
 # ==========================================================
 # FILE: app/services/scraper.py
 # TRUSTLYTICS AI SAAS
-# ENTERPRISE HYBRID SCRAPER
-# APIFY + PLAYWRIGHT + RESIDENTIAL PROXY
-# RAILWAY PRODUCTION VERSION
+# ENTERPRISE GOOGLE REVIEWS SCRAPER
+# PLAYWRIGHT + RESIDENTIAL PROXY + APIFY FALLBACK
+# FULL RAILWAY PRODUCTION VERSION
 # ==========================================================
 
 import os
@@ -16,6 +16,19 @@ import random
 
 from datetime import datetime
 from typing import Dict, Any, List
+
+import aiohttp
+import httpx
+
+from bs4 import BeautifulSoup
+from fake_useragent import UserAgent
+from selectolax.parser import HTMLParser
+
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential
+)
 
 from sqlalchemy import (
     select,
@@ -30,15 +43,6 @@ from apify_client import ApifyClient
 from playwright.async_api import (
     async_playwright,
     TimeoutError as PlaywrightTimeoutError
-)
-
-from fake_useragent import UserAgent
-from bs4 import BeautifulSoup
-
-from tenacity import (
-    retry,
-    stop_after_attempt,
-    wait_exponential
 )
 
 from app.core.models import (
@@ -72,9 +76,20 @@ logger = logging.getLogger(
 # ENV VARIABLES
 # ==========================================================
 
-PROXY_SERVER = os.getenv("PROXY_SERVER")
-PROXY_USERNAME = os.getenv("PROXY_USERNAME")
-PROXY_PASSWORD = os.getenv("PROXY_PASSWORD")
+PROXY_SERVER = os.getenv(
+    "PROXY_SERVER",
+    "http://gw.dataimpulse.com:823"
+)
+
+PROXY_USERNAME = os.getenv(
+    "PROXY_USERNAME",
+    "f24ab799ffcf42cf2c54"
+)
+
+PROXY_PASSWORD = os.getenv(
+    "PROXY_PASSWORD",
+    "e25628cf2c1b3ba3"
+)
 
 HEADLESS = True
 
@@ -172,66 +187,6 @@ class ReviewService:
         except Exception:
 
             return 0
-
-    @staticmethod
-    async def get_negative_reviews(
-        db: AsyncSession,
-        company_id: int
-    ):
-
-        try:
-
-            stmt = (
-                select(Review)
-                .where(
-                    Review.company_id == company_id
-                )
-                .where(
-                    Review.rating <= 2
-                )
-            )
-
-            result = await db.execute(stmt)
-
-            return result.scalars().all()
-
-        except Exception:
-
-            return []
-
-    @staticmethod
-    async def get_dashboard_stats(
-        db: AsyncSession,
-        company_id: int
-    ):
-
-        total_reviews = await ReviewService.get_total_reviews(
-            db=db,
-            company_id=company_id
-        )
-
-        average_rating = await ReviewService.get_average_rating(
-            db=db,
-            company_id=company_id
-        )
-
-        negative_reviews = await ReviewService.get_negative_reviews(
-            db=db,
-            company_id=company_id
-        )
-
-        reputation_score = round(
-            average_rating * 20,
-            2
-        )
-
-        return {
-
-            "total_reviews": total_reviews,
-            "average_rating": average_rating,
-            "negative_reviews": len(negative_reviews),
-            "reputation_score": reputation_score
-        }
 
 # ==========================================================
 # HELPERS
@@ -362,8 +317,8 @@ def create_apify_client():
 
     if not token:
 
-        logger.error(
-            "❌ APIFY_TOKEN missing"
+        logger.warning(
+            "⚠️ APIFY_TOKEN missing"
         )
 
         return None
@@ -382,42 +337,6 @@ def build_google_maps_url(
         "https://www.google.com/maps/search/"
         f"?api=1&query_place_id={place_id}"
     )
-
-# ==========================================================
-# ACTOR INPUT
-# ==========================================================
-
-def build_actor_input(
-    google_maps_url: str,
-    target_limit: int
-):
-
-    return {
-
-        "startUrls": [
-            {
-                "url": google_maps_url
-            }
-        ],
-
-        "language": "en",
-
-        "maxReviews": target_limit,
-
-        "reviewsSort": "newest",
-
-        "reviewsOrigin": "all",
-
-        "personalData": True,
-
-        "maxImages": 0,
-
-        "maxCrawledPlaces": 1,
-
-        "proxy": {
-            "useApifyProxy": True
-        }
-    }
 
 # ==========================================================
 # EXISTING REVIEWS
@@ -479,7 +398,6 @@ def normalize_review(
             or item.get("reviewText")
             or item.get("review")
             or item.get("comment")
-            or item.get("reviewDescription")
             or ""
         )
 
@@ -494,7 +412,6 @@ def normalize_review(
         rating = (
             item.get("stars")
             or item.get("rating")
-            or item.get("score")
             or 5
         )
 
@@ -503,26 +420,8 @@ def normalize_review(
             5
         )
 
-        rating = max(
-            1,
-            min(5, rating)
-        )
-
-        review_likes = (
-            item.get("likesCount")
-            or item.get("likes")
-            or 0
-        )
-
-        review_likes = safe_int(
-            review_likes,
-            0
-        )
-
         review_time = (
             item.get("publishedAtDate")
-            or item.get("publishedAt")
-            or item.get("reviewDate")
             or item.get("date")
         )
 
@@ -532,7 +431,6 @@ def normalize_review(
 
         google_review_id = (
             item.get("reviewId")
-            or item.get("review_id")
             or item.get("id")
         )
 
@@ -542,10 +440,6 @@ def normalize_review(
                 f"{company_id}_"
                 f"{generate_hash(author_name, review_text)}"
             )
-
-        google_review_id = safe_string(
-            google_review_id
-        )
 
         sentiment_score = round(
             rating / 5,
@@ -559,7 +453,7 @@ def normalize_review(
             "rating": rating,
             "text": review_text,
             "google_review_time": review_time,
-            "review_likes": review_likes,
+            "review_likes": 0,
             "sentiment_score": sentiment_score
         }
 
@@ -572,7 +466,7 @@ def normalize_review(
         return None
 
 # ==========================================================
-# PLAYWRIGHT FALLBACK SCRAPER
+# PLAYWRIGHT SCRAPER
 # ==========================================================
 
 @retry(
@@ -583,10 +477,14 @@ def normalize_review(
         max=10
     )
 )
-async def playwright_fallback_scraper(
+async def playwright_scraper(
     google_maps_url: str,
     target_limit: int = 100
 ):
+
+    logger.info(
+        "🚀 PLAYWRIGHT SCRAPER STARTED"
+    )
 
     reviews = []
 
@@ -600,7 +498,7 @@ async def playwright_fallback_scraper(
                 "server": PROXY_SERVER,
                 "username": PROXY_USERNAME,
                 "password": PROXY_PASSWORD,
-            } if PROXY_SERVER else None,
+            },
 
             args=[
                 "--disable-blink-features=AutomationControlled",
@@ -627,7 +525,7 @@ async def playwright_fallback_scraper(
         try:
 
             logger.info(
-                "🚀 PLAYWRIGHT FALLBACK STARTED"
+                f"🌐 Opening URL: {google_maps_url}"
             )
 
             await page.goto(
@@ -640,13 +538,32 @@ async def playwright_fallback_scraper(
                 random.uniform(3, 6)
             )
 
+            # ==================================================
+            # SAVE DEBUG HTML
+            # ==================================================
+
+            html_before = await page.content()
+
+            with open(
+                "debug_before_reviews.html",
+                "w",
+                encoding="utf-8"
+            ) as f:
+                f.write(html_before)
+
+            # ==================================================
+            # CLICK REVIEW BUTTON
+            # ==================================================
+
             selectors = [
 
                 'button[jsaction*="pane.reviewChart.moreReviews"]',
 
                 'button[aria-label*="reviews"]',
 
-                'button[aria-label*="Reviews"]'
+                'button[aria-label*="Reviews"]',
+
+                'button[role="tab"]'
             ]
 
             opened = False
@@ -665,19 +582,33 @@ async def playwright_fallback_scraper(
 
                         opened = True
 
+                        logger.info(
+                            f"✅ Review panel opened using: {selector}"
+                        )
+
                         break
 
                 except Exception:
                     pass
 
+            if not opened:
+
+                logger.warning(
+                    "⚠️ Could not open review panel"
+                )
+
             await asyncio.sleep(
                 random.uniform(3, 5)
             )
 
+            # ==================================================
+            # SCROLL ENGINE
+            # ==================================================
+
             previous_height = 0
             retries = 0
 
-            while retries < 6:
+            while retries < 8:
 
                 await page.mouse.wheel(
                     0,
@@ -697,6 +628,10 @@ async def playwright_fallback_scraper(
                     """
                 )
 
+                logger.info(
+                    f"📜 Scroll Height: {current_height}"
+                )
+
                 if current_height == previous_height:
 
                     retries += 1
@@ -707,12 +642,33 @@ async def playwright_fallback_scraper(
 
                 previous_height = current_height
 
+            # ==================================================
+            # FINAL HTML
+            # ==================================================
+
             html = await page.content()
+
+            with open(
+                "debug_after_reviews.html",
+                "w",
+                encoding="utf-8"
+            ) as f:
+                f.write(html)
+
+            # ==================================================
+            # BEAUTIFULSOUP PARSER
+            # ==================================================
 
             soup = BeautifulSoup(
                 html,
                 "lxml"
             )
+
+            # ==================================================
+            # SELECTOLAX PARSER
+            # ==================================================
+
+            tree = HTMLParser(html)
 
             review_blocks = soup.select(
                 'div[data-review-id]'
@@ -783,7 +739,7 @@ async def playwright_fallback_scraper(
                 except Exception as row_error:
 
                     logger.exception(
-                        f"❌ Playwright row failed: {row_error}"
+                        f"❌ Review parse failed: {row_error}"
                     )
 
         except PlaywrightTimeoutError:
@@ -810,6 +766,104 @@ async def playwright_fallback_scraper(
     return reviews
 
 # ==========================================================
+# APIFY FALLBACK
+# ==========================================================
+
+async def apify_fallback_scraper(
+    google_maps_url: str,
+    target_limit: int
+):
+
+    logger.info(
+        "🚀 APIFY FALLBACK STARTED"
+    )
+
+    client = create_apify_client()
+
+    if not client:
+
+        return []
+
+    try:
+
+        actor_input = {
+
+            "startUrls": [
+                {
+                    "url": google_maps_url
+                }
+            ],
+
+            "language": "en",
+
+            "maxReviews": target_limit,
+
+            "reviewsSort": "newest",
+
+            "reviewsOrigin": "all",
+
+            "personalData": True,
+
+            "maxImages": 0,
+
+            "maxCrawledPlaces": 1,
+
+            "proxy": {
+                "useApifyProxy": True
+            }
+        }
+
+        run = await asyncio.to_thread(
+            client.actor(
+                "compass~google-maps-reviews-scraper"
+            ).call,
+            run_input=actor_input
+        )
+
+        dataset_id = run.get(
+            "defaultDatasetId"
+        )
+
+        if not dataset_id:
+
+            return []
+
+        dataset = client.dataset(
+            dataset_id
+        )
+
+        raw_reviews = []
+
+        for attempt in range(10):
+
+            dataset_items = await asyncio.to_thread(
+                dataset.list_items,
+                clean=True,
+                limit=target_limit
+            )
+
+            raw_reviews = dataset_items.items
+
+            logger.info(
+                f"📦 APIFY REVIEWS: {len(raw_reviews)}"
+            )
+
+            if raw_reviews:
+                break
+
+            await asyncio.sleep(2)
+
+        return raw_reviews
+
+    except Exception as e:
+
+        logger.exception(
+            f"❌ APIFY FAILED: {e}"
+        )
+
+        return []
+
+# ==========================================================
 # MAIN SCRAPER
 # ==========================================================
 
@@ -823,140 +877,53 @@ async def fetch_reviews_from_google(
 
     target_limit: int = 100
 
-) -> Dict[str, Any]:
+):
 
     logger.info(
         f"🚀 SCRAPER STARTED | company_id={company_id}"
     )
 
-    started_at = datetime.utcnow()
-
     try:
-
-        if not place_id:
-
-            logger.error(
-                "❌ place_id missing"
-            )
-
-            return {
-
-                "success": False,
-                "inserted": 0,
-                "updated": 0,
-                "duplicates": 0,
-                "fetched": 0,
-                "reviews": []
-            }
 
         existing_reviews = await get_existing_reviews(
             session=session,
             company_id=company_id
         )
 
-        logger.info(
-            f"📦 Existing reviews: {len(existing_reviews)}"
-        )
-
-        client = create_apify_client()
-
         google_maps_url = build_google_maps_url(
             place_id
         )
 
-        existing_count = len(
-            existing_reviews
+        logger.info(
+            f"🌐 GOOGLE MAPS URL: {google_maps_url}"
         )
 
-        dynamic_target_limit = min(
-            existing_count + target_limit,
-            5000
+        logger.info(
+            f"🆔 PLACE ID: {place_id}"
         )
 
-        raw_reviews = []
-
         # ==================================================
-        # APIFY PRIMARY
+        # PRIMARY PLAYWRIGHT SCRAPER
         # ==================================================
 
-        if client:
+        raw_reviews = await playwright_scraper(
 
-            try:
+            google_maps_url=google_maps_url,
 
-                actor_input = build_actor_input(
-                    google_maps_url=google_maps_url,
-                    target_limit=dynamic_target_limit
-                )
-
-                logger.info(
-                    "🚀 Starting APIFY actor..."
-                )
-
-                run = await asyncio.to_thread(
-                    client.actor(
-                        "compass~google-maps-reviews-scraper"
-                    ).call,
-                    run_input=actor_input
-                )
-
-                dataset_id = run.get(
-                    "defaultDatasetId"
-                )
-
-                if dataset_id:
-
-                    dataset = client.dataset(
-                        dataset_id
-                    )
-
-                    for attempt in range(10):
-
-                        try:
-
-                            dataset_items = await asyncio.to_thread(
-                                dataset.list_items,
-                                clean=True,
-                                limit=dynamic_target_limit
-                            )
-
-                            raw_reviews = dataset_items.items
-
-                            logger.info(
-                                f"📦 APIFY REVIEWS: {len(raw_reviews)}"
-                            )
-
-                            if raw_reviews:
-                                break
-
-                        except Exception as dataset_error:
-
-                            logger.warning(
-                                f"⚠️ Dataset retry: {dataset_error}"
-                            )
-
-                        await asyncio.sleep(2)
-
-            except Exception as apify_error:
-
-                logger.exception(
-                    f"❌ APIFY FAILED: {apify_error}"
-                )
+            target_limit=target_limit
+        )
 
         # ==================================================
-        # PLAYWRIGHT FALLBACK
+        # APIFY FALLBACK
         # ==================================================
 
         if not raw_reviews:
 
             logger.warning(
-                "⚠️ APIFY returned 0 reviews"
+                "⚠️ PLAYWRIGHT returned 0 reviews"
             )
 
-            logger.info(
-                "🚀 Switching to PLAYWRIGHT fallback"
-            )
-
-            raw_reviews = await playwright_fallback_scraper(
+            raw_reviews = await apify_fallback_scraper(
 
                 google_maps_url=google_maps_url,
 
@@ -971,10 +938,6 @@ async def fetch_reviews_from_google(
 
         memory_hashes = set()
 
-        # ==================================================
-        # PROCESS REVIEWS
-        # ==================================================
-
         for item in raw_reviews:
 
             try:
@@ -987,62 +950,27 @@ async def fetch_reviews_from_google(
                 if not normalized:
                     continue
 
-                google_review_id = normalized.get(
-                    "google_review_id"
-                )
-
-                memory_key = normalized[
+                google_review_id = normalized[
                     "google_review_id"
                 ]
 
-                if memory_key in memory_hashes:
+                if google_review_id in memory_hashes:
 
                     duplicate_count += 1
                     continue
 
                 memory_hashes.add(
-                    memory_key
+                    google_review_id
                 )
 
                 existing_review = existing_reviews.get(
                     google_review_id
                 )
 
-                # ==========================================
-                # UPDATE EXISTING
-                # ==========================================
-
                 if existing_review:
 
-                    updated = False
-
-                    if existing_review.text != normalized["text"]:
-
-                        existing_review.text = normalized["text"]
-                        updated = True
-
-                    if existing_review.rating != normalized["rating"]:
-
-                        existing_review.rating = normalized["rating"]
-                        updated = True
-
-                    if updated:
-
-                        existing_review.sentiment_score = normalized["sentiment_score"]
-
-                        existing_review.google_review_time = normalized["google_review_time"]
-
-                        updated_count += 1
-
-                    else:
-
-                        duplicate_count += 1
-
+                    duplicate_count += 1
                     continue
-
-                # ==========================================
-                # INSERT NEW REVIEW
-                # ==========================================
 
                 new_review = Review(
 
@@ -1077,16 +1005,11 @@ async def fetch_reviews_from_google(
 
                 inserted_count += 1
 
-                if inserted_count >= target_limit:
-                    break
-
             except Exception as row_error:
 
                 logger.exception(
-                    f"❌ Row processing failed: {row_error}"
+                    f"❌ Row failed: {row_error}"
                 )
-
-                continue
 
         # ==================================================
         # COMMIT
@@ -1112,41 +1035,12 @@ async def fetch_reviews_from_google(
                 f"❌ Commit failed: {commit_error}"
             )
 
-            return {
-
-                "success": False,
-
-                "inserted": 0,
-
-                "updated": 0,
-
-                "duplicates": 0,
-
-                "fetched": len(raw_reviews),
-
-                "reviews": []
-            }
-
-        execution_seconds = (
-            datetime.utcnow() - started_at
-        ).total_seconds()
-
-        if execution_seconds < 5:
-
-            await asyncio.sleep(
-                5 - execution_seconds
-            )
-
         logger.info(
             f"✅ FETCHED: {len(raw_reviews)}"
         )
 
         logger.info(
             f"✅ INSERTED: {inserted_count}"
-        )
-
-        logger.info(
-            f"✅ UPDATED: {updated_count}"
         )
 
         logger.info(
@@ -1157,32 +1051,15 @@ async def fetch_reviews_from_google(
 
             "success": True,
 
-            "message":
-                f"{inserted_count} new reviews added successfully",
+            "inserted": inserted_count,
 
-            "inserted":
-                inserted_count,
+            "updated": updated_count,
 
-            "updated":
-                updated_count,
+            "duplicates": duplicate_count,
 
-            "duplicates":
-                duplicate_count,
+            "fetched": len(raw_reviews),
 
-            "fetched":
-                len(raw_reviews),
-
-            "requested":
-                dynamic_target_limit,
-
-            "existing":
-                existing_count,
-
-            "final_total":
-                existing_count + inserted_count,
-
-            "reviews":
-                inserted_reviews
+            "reviews": inserted_reviews
         }
 
     except Exception as e:
