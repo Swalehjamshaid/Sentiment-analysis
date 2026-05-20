@@ -67,19 +67,17 @@ PROXY_PASSWORD = os.getenv(
 # ==========================================================
 # IMPORTANT
 # ==========================================================
-# UC MODE WORKS BETTER ON RAILWAY WITH HEADLESS FALSE
-# ==========================================================
 
 HEADLESS = False
 
-MAX_SCROLL_ATTEMPTS = 120
-MAX_IDLE_SCROLLS = 12
+MAX_SCROLL_ATTEMPTS = 150
+MAX_IDLE_SCROLLS = 15
 
 SCROLL_PAUSE_MIN = 2
 SCROLL_PAUSE_MAX = 4
 
 # ==========================================================
-# MULTI LANGUAGE REVIEW WORDS
+# REVIEW WORDS
 # ==========================================================
 
 REVIEW_WORDS = [
@@ -395,7 +393,7 @@ def is_rate_limited(driver):
         return False
 
 # ==========================================================
-# HUMAN SESSION WARMUP
+# HUMAN WARMUP
 # ==========================================================
 
 def warmup_session(driver):
@@ -463,7 +461,7 @@ def click_first_search_result(driver):
             )
 
             logger.info(
-                f"📦 RESULTS FOUND: {len(results)}"
+                f"📦 RESULTS FOUND ({selector}): {len(results)}"
             )
 
             if not results:
@@ -490,11 +488,8 @@ def click_first_search_result(driver):
 
                         first.send_keys("\n")
 
-                    except Exception as click_error:
-
-                        logger.exception(
-                            f"❌ CLICK FAILED: {click_error}"
-                        )
+                    except Exception:
+                        pass
 
             logger.info(
                 "✅ SEARCH RESULT CLICKED"
@@ -507,7 +502,7 @@ def click_first_search_result(driver):
         except Exception as e:
 
             logger.exception(
-                f"❌ SEARCH RESULT FAILED: {e}"
+                f"❌ SEARCH CLICK FAILED: {e}"
             )
 
     return False
@@ -522,94 +517,104 @@ def open_reviews_panel(driver):
         "📦 OPENING REVIEWS PANEL"
     )
 
-    time.sleep(5)
+    time.sleep(8)
 
-    buttons = driver.find_elements(
+    review_selectors = [
 
-        "css selector",
+        'button[jsaction]',
 
-        'button[jsaction], button[aria-label]'
-    )
+        'button[aria-label*="review"]',
 
-    logger.info(
-        f"📦 BUTTONS FOUND: {len(buttons)}"
-    )
+        'button[aria-label*="Review"]',
 
-    for btn in buttons:
+        'button[aria-label*="reviews"]',
+
+        'button[aria-label*="Reviews"]',
+
+        'div[role="tab"]'
+    ]
+
+    for selector in review_selectors:
 
         try:
 
-            text = safe_string(
-                btn.text
-            ).lower()
+            buttons = driver.find_elements(
+                "css selector",
+                selector
+            )
 
-            aria = safe_string(
-                btn.get_attribute(
-                    "aria-label"
-                )
-            ).lower()
+            logger.info(
+                f"📦 BUTTONS FOUND ({selector}): {len(buttons)}"
+            )
 
-            combined = f"{text} {aria}"
+            for btn in buttons:
 
-            for keyword in REVIEW_WORDS:
+                try:
 
-                if keyword in combined:
+                    text = safe_string(
+                        btn.text
+                    ).lower()
 
-                    logger.info(
-                        f"✅ REVIEW BUTTON MATCHED: {combined}"
-                    )
-
-                    try:
-
-                        driver.execute_script(
-                            "arguments[0].click();",
-                            btn
+                    aria = safe_string(
+                        btn.get_attribute(
+                            "aria-label"
                         )
+                    ).lower()
 
-                    except Exception:
+                    combined = f"{text} {aria}"
 
-                        try:
+                    for keyword in REVIEW_WORDS:
 
-                            btn.click()
+                        if keyword in combined:
 
-                        except Exception:
+                            logger.info(
+                                f"✅ REVIEW BUTTON FOUND: {combined}"
+                            )
 
                             try:
 
-                                btn.send_keys("\n")
-
-                            except Exception as click_error:
-
-                                logger.exception(
-                                    f"❌ REVIEW CLICK FAILED: {click_error}"
+                                driver.execute_script(
+                                    "arguments[0].click();",
+                                    btn
                                 )
 
-                    logger.info(
-                        "✅ REVIEWS BUTTON CLICKED"
-                    )
+                            except Exception:
 
-                    time.sleep(8)
+                                try:
 
-                    feed = driver.find_elements(
+                                    btn.click()
 
-                        "css selector",
+                                except Exception:
 
-                        'div[role="feed"]'
-                    )
+                                    try:
 
-                    if feed:
+                                        btn.send_keys("\n")
 
-                        logger.info(
-                            "✅ REVIEW FEED VERIFIED"
-                        )
+                                    except Exception:
+                                        pass
 
-                        return True
+                            time.sleep(8)
 
-        except Exception as e:
+                            feed = driver.find_elements(
 
-            logger.exception(
-                f"❌ REVIEW BUTTON ERROR: {e}"
-            )
+                                "css selector",
+
+                                'div[role="feed"]'
+                            )
+
+                            if feed:
+
+                                logger.info(
+                                    "✅ REVIEW FEED VERIFIED"
+                                )
+
+                                return True
+
+                except Exception:
+                    pass
+
+        except Exception:
+            pass
 
     return False
 
@@ -619,27 +624,35 @@ def open_reviews_panel(driver):
 
 def expand_review_buttons(driver):
 
-    try:
+    selectors = [
 
-        buttons = driver.find_elements(
-            "css selector",
-            "button.w8nwRe"
-        )
+        "button.w8nwRe",
+        "button[jsaction*='pane.review.expandReview']"
+    ]
 
-        for btn in buttons:
+    for selector in selectors:
 
-            try:
+        try:
 
-                driver.execute_script(
-                    "arguments[0].click();",
-                    btn
-                )
+            buttons = driver.find_elements(
+                "css selector",
+                selector
+            )
 
-            except Exception:
-                pass
+            for btn in buttons:
 
-    except Exception:
-        pass
+                try:
+
+                    driver.execute_script(
+                        "arguments[0].click();",
+                        btn
+                    )
+
+                except Exception:
+                    pass
+
+        except Exception:
+            pass
 
 # ==========================================================
 # EXTRACT REVIEWS
@@ -688,6 +701,18 @@ def extract_reviews(
                 f"📦 SCROLL ATTEMPT: {attempt}"
             )
 
+            logger.info(
+                f"🌐 PAGE TITLE: {driver.title}"
+            )
+
+            logger.info(
+                f"🌐 CURRENT URL: {driver.current_url}"
+            )
+
+            logger.info(
+                f"🌐 PAGE SOURCE LENGTH: {len(driver.page_source)}"
+            )
+
             cards = driver.find_elements(
 
                 "css selector",
@@ -708,26 +733,39 @@ def extract_reviews(
                     rating = 5
 
                     # AUTHOR
-                    try:
+                    author_selectors = [
 
-                        author_elem = card.find_element(
-                            "css selector",
-                            ".d4r55"
-                        )
+                        ".d4r55",
+                        ".TSUbDb",
+                        "span[class*='d4r55']"
+                    ]
 
-                        author = safe_string(
-                            author_elem.text
-                        )
+                    for selector in author_selectors:
 
-                    except Exception:
-                        pass
+                        try:
+
+                            author_elem = card.find_element(
+                                "css selector",
+                                selector
+                            )
+
+                            author = safe_string(
+                                author_elem.text
+                            )
+
+                            if author:
+                                break
+
+                        except Exception:
+                            pass
 
                     # REVIEW TEXT
                     text_selectors = [
 
                         ".wiI7pd",
                         ".MyEned",
-                        "span[class*='wiI7pd']"
+                        "span[class*='wiI7pd']",
+                        "span[jscontroller]"
                     ]
 
                     for selector in text_selectors:
@@ -753,25 +791,33 @@ def extract_reviews(
                         continue
 
                     # RATING
-                    try:
+                    rating_selectors = [
 
-                        rating_elem = card.find_element(
+                        "span[aria-label*='star']",
+                        "span.kvMYJc"
+                    ]
 
-                            "css selector",
+                    for selector in rating_selectors:
 
-                            "span[aria-label*='star']"
-                        )
+                        try:
 
-                        rating_label = rating_elem.get_attribute(
-                            "aria-label"
-                        )
+                            rating_elem = card.find_element(
+                                "css selector",
+                                selector
+                            )
 
-                        rating = normalize_rating(
-                            rating_label
-                        )
+                            rating_label = rating_elem.get_attribute(
+                                "aria-label"
+                            )
 
-                    except Exception:
-                        pass
+                            rating = normalize_rating(
+                                rating_label
+                            )
+
+                            break
+
+                        except Exception:
+                            pass
 
                     review_id = generate_hash(
                         author,
@@ -822,9 +868,9 @@ def extract_reviews(
                 driver
             )
 
-            # ==================================================
-            # SLOWER HUMAN-LIKE SCROLL
-            # ==================================================
+            # ==============================================
+            # HUMAN SCROLL
+            # ==============================================
 
             driver.execute_script(
                 """
@@ -903,7 +949,10 @@ async def scrape_google_reviews(
             f"🌐 DRIVER TITLE: {driver.title}"
         )
 
+        # ==============================================
         # VERIFY PROXY
+        # ==============================================
+
         logger.info(
             "🌐 VERIFYING PROXY"
         )
@@ -916,12 +965,18 @@ async def scrape_google_reviews(
             f"🌐 ACTIVE IP: {driver.page_source}"
         )
 
+        # ==============================================
         # WARMUP
+        # ==============================================
+
         warmup_session(
             driver
         )
 
+        # ==============================================
         # SEARCH NAVIGATION
+        # ==============================================
+
         search_url = build_google_maps_search_url(
             business_name
         )
@@ -934,13 +989,20 @@ async def scrape_google_reviews(
             search_url
         )
 
+        time.sleep(10)
+
         logger.info(
             f"🌐 CURRENT URL: {driver.current_url}"
         )
 
-        time.sleep(10)
+        logger.info(
+            f"🌐 PAGE TITLE: {driver.title}"
+        )
 
+        # ==============================================
         # CAPTCHA CHECK
+        # ==============================================
+
         if is_rate_limited(driver):
 
             logger.warning(
@@ -951,7 +1013,10 @@ async def scrape_google_reviews(
 
             return []
 
+        # ==============================================
         # CLICK RESULT
+        # ==============================================
+
         clicked = click_first_search_result(
             driver
         )
@@ -965,10 +1030,13 @@ async def scrape_google_reviews(
             return []
 
         logger.info(
-            f"🌐 PAGE TITLE: {driver.title}"
+            f"🌐 PAGE TITLE AFTER CLICK: {driver.title}"
         )
 
+        # ==============================================
         # OPEN REVIEWS
+        # ==============================================
+
         opened = open_reviews_panel(
             driver
         )
@@ -981,7 +1049,10 @@ async def scrape_google_reviews(
 
             return []
 
+        # ==============================================
         # EXTRACT REVIEWS
+        # ==============================================
+
         reviews = extract_reviews(
 
             driver,
