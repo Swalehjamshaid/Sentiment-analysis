@@ -1,9 +1,8 @@
 # ==========================================================
 # FILE: app/services/scraper.py
 # TRUSTLYTICS AI SAAS
-# ENTERPRISE GOOGLE REVIEW SCRAPER
-# PLAYWRIGHT ONLY VERSION
-# FAST + POWERFUL + 500 REVIEWS OPTIMIZED
+# PLAYWRIGHT GOOGLE REVIEW SCRAPER
+# FAST + STABLE + RAILWAY OPTIMIZED
 # FULLY INTEGRATED WITH reviews.py
 # ==========================================================
 
@@ -18,8 +17,6 @@ import random
 
 from datetime import datetime
 from typing import Dict, Any
-
-from bs4 import BeautifulSoup
 
 from tenacity import (
     retry,
@@ -74,10 +71,10 @@ PROXY_PASSWORD = os.getenv(
 
 HEADLESS = True
 
-SCROLL_PAUSE_MIN = 1.5
-SCROLL_PAUSE_MAX = 2.5
+SCROLL_PAUSE_MIN = 2
+SCROLL_PAUSE_MAX = 4
 
-MAX_SCROLL_RETRIES = 8
+MAX_SCROLL_RETRIES = 15
 
 SCRAPER_SEMAPHORE = asyncio.Semaphore(2)
 
@@ -397,6 +394,18 @@ async def playwright_scraper(
             "🚀 PLAYWRIGHT SCRAPER STARTED"
         )
 
+        logger.info(
+            f"🌐 PROXY SERVER: {PROXY_SERVER}"
+        )
+
+        logger.info(
+            f"🌐 USERNAME EXISTS: {bool(PROXY_USERNAME)}"
+        )
+
+        logger.info(
+            f"🌐 PASSWORD EXISTS: {bool(PROXY_PASSWORD)}"
+        )
+
         reviews = []
 
         seen_review_ids = set()
@@ -469,9 +478,31 @@ async def playwright_scraper(
 
             page = await context.new_page()
 
+            page.set_default_timeout(45000)
+
             await stealth_async(page)
 
             try:
+
+                # ==================================================
+                # VERIFY PROXY
+                # ==================================================
+
+                await page.goto(
+                    "https://api.ipify.org?format=json"
+                )
+
+                proxy_ip = await page.text_content(
+                    "body"
+                )
+
+                logger.info(
+                    f"🌐 ACTIVE PROXY IP: {proxy_ip}"
+                )
+
+                # ==================================================
+                # OPEN GOOGLE MAPS
+                # ==================================================
 
                 logger.info(
                     f"🌐 Opening URL: {google_maps_url}"
@@ -483,21 +514,13 @@ async def playwright_scraper(
 
                     wait_until="domcontentloaded",
 
-                    timeout=120000
+                    timeout=45000
                 )
 
-                await asyncio.sleep(6)
+                await asyncio.sleep(10)
 
                 # ==================================================
-                # SCREENSHOT DEBUG
-                # ==================================================
-
-                await page.screenshot(
-                    path="debug_1_page_loaded.png"
-                )
-
-                # ==================================================
-                # CAPTCHA DETECTION
+                # CAPTCHA CHECK
                 # ==================================================
 
                 if "sorry/index" in page.url:
@@ -514,30 +537,36 @@ async def playwright_scraper(
 
                 try:
 
-                    consent_selectors = [
+                    consent_buttons = await page.locator(
+                        "button"
+                    ).all()
 
-                        'button:has-text("Accept all")',
-
-                        'button:has-text("I agree")',
-
-                        'button:has-text("Accept")'
-                    ]
-
-                    for selector in consent_selectors:
+                    for btn in consent_buttons:
 
                         try:
 
-                            button = await page.query_selector(
-                                selector
-                            )
+                            text = await btn.text_content()
 
-                            if button:
+                            if text:
 
-                                await button.click()
+                                lower = text.lower()
 
-                                await asyncio.sleep(2)
+                                if (
 
-                                break
+                                    "accept" in lower
+
+                                    or "agree" in lower
+                                ):
+
+                                    await btn.click()
+
+                                    logger.info(
+                                        "✅ CONSENT ACCEPTED"
+                                    )
+
+                                    await asyncio.sleep(3)
+
+                                    break
 
                         except Exception:
                             pass
@@ -546,59 +575,53 @@ async def playwright_scraper(
                     pass
 
                 # ==================================================
-                # OPEN REVIEWS
+                # OPEN REVIEWS PANEL
                 # ==================================================
 
-                selectors = [
-
-                    'button[jsaction*="pane.reviewChart.moreReviews"]',
-
-                    'button[aria-label*=" reviews"]',
-
-                    'button[aria-label*=" Reviews"]',
-
-                    'button[role="tab"]'
-                ]
+                buttons = await page.locator(
+                    "button"
+                ).all()
 
                 opened = False
 
-                for selector in selectors:
+                for btn in buttons:
 
                     try:
 
-                        button = await page.wait_for_selector(
+                        text = await btn.text_content()
 
-                            selector,
-
-                            timeout=15000
+                        aria = await btn.get_attribute(
+                            "aria-label"
                         )
 
-                        if button:
+                        combined = (
+                            f"{text} {aria}"
+                        ).lower()
 
-                            await button.click()
+                        if "review" in combined:
+
+                            await btn.click()
 
                             opened = True
 
                             logger.info(
-                                "✅ REVIEWS BUTTON CLICKED"
+                                "✅ REVIEW BUTTON FOUND AND CLICKED"
                             )
+
+                            await asyncio.sleep(10)
 
                             break
 
                     except Exception:
                         pass
 
-                await asyncio.sleep(5)
-
-                await page.screenshot(
-                    path="debug_2_reviews_opened.png"
-                )
-
                 if not opened:
 
                     logger.warning(
-                        "⚠️ Could not open reviews panel"
+                        "⚠️ REVIEWS BUTTON NOT FOUND"
                     )
+
+                    return []
 
                 # ==================================================
                 # REVIEW FEED
@@ -608,12 +631,12 @@ async def playwright_scraper(
                     'div[role="feed"]'
                 )
 
-                await review_feed.wait_for(
-                    timeout=30000
-                )
+                await asyncio.sleep(8)
+
+                feed_html = await review_feed.inner_html()
 
                 logger.info(
-                    "✅ REVIEW FEED FOUND"
+                    f"📦 REVIEW FEED HTML LENGTH: {len(feed_html)}"
                 )
 
                 loaded_count = 0
@@ -625,11 +648,11 @@ async def playwright_scraper(
                     try:
 
                         # ==========================================
-                        # SCROLL INSIDE FEED
+                        # SCROLL
                         # ==========================================
 
                         await review_feed.evaluate(
-                            "(el) => el.scrollBy(0, 5000)"
+                            "(el) => el.scrollBy(0, 8000)"
                         )
 
                         await asyncio.sleep(
@@ -641,7 +664,7 @@ async def playwright_scraper(
                         )
 
                         # ==========================================
-                        # EXPAND MORE BUTTONS
+                        # EXPAND MORE
                         # ==========================================
 
                         more_buttons = await page.locator(
@@ -664,7 +687,9 @@ async def playwright_scraper(
                         # ==========================================
 
                         review_elements = await page.locator(
-                            'div.jftiEf'
+
+                            'div[data-review-id], div.jftiEf, div[role="article"]'
+
                         ).all()
 
                         current_count = len(
@@ -676,7 +701,7 @@ async def playwright_scraper(
                         )
 
                         # ==========================================
-                        # LIVE EXTRACTION
+                        # EXTRACT REVIEWS
                         # ==========================================
 
                         for review_element in review_elements:
@@ -695,7 +720,8 @@ async def playwright_scraper(
                                 )
 
                                 review_text_elem = review_element.locator(
-                                    ".wiI7pd"
+
+                                    ".wiI7pd, .MyEned, span[class*='wiI7pd']"
                                 )
 
                                 review_text = await review_text_elem.text_content()
@@ -800,37 +826,10 @@ async def playwright_scraper(
 
                         break
 
-                # ==================================================
-                # CAPTCHA CHECK
-                # ==================================================
-
-                html = await page.content()
-
-                html_lower = html.lower()
-
-                captcha_keywords = [
-
-                    "unusual traffic",
-
-                    "captcha",
-
-                    "not a robot"
-                ]
-
-                for keyword in captcha_keywords:
-
-                    if keyword in html_lower:
-
-                        logger.warning(
-                            f"⚠️ CAPTCHA DETECTED: {keyword}"
-                        )
-
-                        return []
-
             except PlaywrightTimeoutError:
 
-                logger.error(
-                    "❌ PLAYWRIGHT TIMEOUT"
+                logger.exception(
+                    "❌ PLAYWRIGHT TIMEOUT OCCURRED"
                 )
 
             except Exception as e:
@@ -852,7 +851,7 @@ async def playwright_scraper(
         return reviews
 
 # ==========================================================
-# MAIN FETCH FUNCTION
+# FETCH REVIEWS
 # ==========================================================
 
 async def fetch_reviews_from_google(
@@ -1001,10 +1000,6 @@ async def fetch_reviews_from_google(
                         ]
                 })
 
-                # ==============================================
-                # BATCH COMMIT
-                # ==============================================
-
                 if idx % 50 == 0:
 
                     await session.commit()
@@ -1014,10 +1009,6 @@ async def fetch_reviews_from_google(
                 logger.exception(
                     f"❌ SAVE REVIEW FAILED: {row_error}"
                 )
-
-        # ==================================================
-        # FINAL COMMIT
-        # ==================================================
 
         try:
 
