@@ -4,7 +4,6 @@
 # PROFESSIONAL GOOGLE MAPS REVIEW SCRAPER
 # SELENIUMBASE UC MODE + RESIDENTIAL PROXY
 # ==========================================================
-
 import os
 import re
 import gc
@@ -13,27 +12,24 @@ import random
 import hashlib
 import logging
 import traceback
-
 from datetime import datetime
 from typing import Dict, Any
-
 from tenacity import (
     retry,
     stop_after_attempt,
     wait_exponential
 )
-
 from fake_useragent import UserAgent
-
 from sqlalchemy import (
     select,
     func,
     desc
 )
-
 from sqlalchemy.ext.asyncio import AsyncSession
-
 from seleniumbase import Driver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 
 from app.core.models import (
     Review,
@@ -43,7 +39,6 @@ from app.core.models import (
 # ==========================================================
 # LOGGER
 # ==========================================================
-
 logger = logging.getLogger(
     "app.services.scraper"
 )
@@ -51,15 +46,12 @@ logger = logging.getLogger(
 # ==========================================================
 # ENVIRONMENT
 # ==========================================================
-
 PROXY_SERVER = os.getenv(
     "PROXY_SERVER"
 )
-
 PROXY_USERNAME = os.getenv(
     "PROXY_USERNAME"
 )
-
 PROXY_PASSWORD = os.getenv(
     "PROXY_PASSWORD"
 )
@@ -67,1332 +59,547 @@ PROXY_PASSWORD = os.getenv(
 # ==========================================================
 # IMPORTANT
 # ==========================================================
-
 HEADLESS = False
-
-MAX_SCROLL_ATTEMPTS = 150
-MAX_IDLE_SCROLLS = 15
-
-SCROLL_PAUSE_MIN = 2
-SCROLL_PAUSE_MAX = 4
+MAX_SCROLL_ATTEMPTS = 180
+MAX_IDLE_SCROLLS = 18
+SCROLL_PAUSE_MIN = 2.8
+SCROLL_PAUSE_MAX = 5.2
 
 # ==========================================================
 # REVIEW WORDS
 # ==========================================================
-
 REVIEW_WORDS = [
-
-    "review",
-    "reviews",
-    "rating",
-    "ratings",
-
-    "avis",
-    "bewertungen",
-    "reseñas",
-    "opinion",
-    "yorum",
-    "отзывы",
-    "口コミ",
-    "리뷰",
-    "评论",
-    "समीक्षा",
-    "recensioni",
+    "review", "reviews", "rating", "ratings", "avis",
+    "bewertungen", "reseñas", "opinion", "yorum",
+    "отзывы", "口コミ", "리뷰", "评论", "समीक्षा", "recensioni",
 ]
 
 # ==========================================================
 # HELPERS
 # ==========================================================
-
 def safe_string(value, default=""):
-
     try:
-
         if value is None:
             return default
-
         return str(value).strip()
-
     except Exception:
-
         return default
 
 
 def safe_int(value, default=0):
-
     try:
-
         return int(float(value))
-
     except Exception:
-
         return default
 
 
 def clean_review_text(text):
-
     text = safe_string(text)
-
     text = text.replace("\n", " ")
     text = text.replace("\r", " ")
     text = text.replace("\t", " ")
-
     text = " ".join(text.split())
-
     return text[:5000]
 
 
 def normalize_rating(label):
-
     try:
-
-        match = re.search(
-            r"([0-9.]+)",
-            str(label)
-        )
-
+        match = re.search(r"([0-9.]+)", str(label))
         if match:
-
-            return int(
-                float(
-                    match.group(1)
-                )
-            )
-
+            return int(float(match.group(1)))
     except Exception:
         pass
-
     return 5
 
 
 def generate_hash(author, text):
-
-    raw = f"{author}_{text}"
-
-    return hashlib.md5(
-        raw.encode("utf-8")
-    ).hexdigest()
+    raw = f"{author}_{text[:250]}"
+    return hashlib.md5(raw.encode("utf-8")).hexdigest()
 
 
 def build_google_maps_search_url(query):
+    query = query.replace(" ", "+")
+    return f"https://www.google.com/maps/search/{query}"
 
-    query = query.replace(
-        " ",
-        "+"
-    )
-
-    return (
-        f"https://www.google.com/maps/search/{query}"
-    )
 
 # ==========================================================
 # EXISTING REVIEWS
 # ==========================================================
-
 async def get_existing_reviews(
     session: AsyncSession,
     company_id: int
 ):
-
     stmt = (
-
         select(Review)
-
-        .where(
-            Review.company_id == company_id
-        )
+        .where(Review.company_id == company_id)
     )
-
-    result = await session.execute(
-        stmt
-    )
-
+    result = await session.execute(stmt)
     rows = result.scalars().all()
-
-    mapped = {}
-
-    for row in rows:
-
-        mapped[
-            row.google_review_id
-        ] = row
-
+    mapped = {row.google_review_id: row for row in rows}
     return mapped
+
 
 # ==========================================================
 # NORMALIZE REVIEW
 # ==========================================================
-
 def normalize_review(
     item: Dict[str, Any],
     company_id: int
 ):
-
     try:
-
-        author_name = safe_string(
-            item.get("author_name"),
-            "Anonymous"
-        )
-
-        review_text = clean_review_text(
-            item.get("text")
-        )
+        author_name = safe_string(item.get("author_name"), "Anonymous")
+        review_text = clean_review_text(item.get("text"))
 
         if not review_text:
             return None
 
-        rating = safe_int(
-            item.get("rating"),
-            5
-        )
-
-        google_review_id = (
-
-            item.get("review_id")
-
-            or generate_hash(
-                author_name,
-                review_text
-            )
-        )
+        rating = safe_int(item.get("rating"), 5)
+        google_review_id = item.get("review_id") or generate_hash(author_name, review_text)
 
         return {
-
-            "google_review_id":
-                google_review_id,
-
-            "author_name":
-                author_name,
-
-            "rating":
-                rating,
-
-            "text":
-                review_text,
-
-            "google_review_time":
-                datetime.utcnow(),
-
-            "review_likes":
-                0,
-
-            "sentiment_score":
-                round(rating / 5, 2)
+            "google_review_id": google_review_id,
+            "author_name": author_name,
+            "rating": rating,
+            "text": review_text,
+            "google_review_time": datetime.utcnow(),
+            "review_likes": 0,
+            "sentiment_score": round(rating / 5, 2)
         }
-
     except Exception as e:
-
-        logger.exception(
-            f"❌ NORMALIZE FAILED: {e}"
-        )
-
+        logger.exception(f"❌ NORMALIZE FAILED: {e}")
         return None
+
 
 # ==========================================================
 # CREATE DRIVER
 # ==========================================================
-
 def create_driver():
-
-    logger.info(
-        "🚀 STARTING SELENIUMBASE UC DRIVER"
-    )
-
+    logger.info("🚀 STARTING SELENIUMBASE UC DRIVER")
     proxy = None
-
-    if (
-        PROXY_SERVER
-        and PROXY_USERNAME
-        and PROXY_PASSWORD
-    ):
-
-        proxy = (
-
-            f"{PROXY_USERNAME}:"
-            f"{PROXY_PASSWORD}@"
-            f"{PROXY_SERVER}"
-        )
+    if PROXY_SERVER and PROXY_USERNAME and PROXY_PASSWORD:
+        proxy = f"{PROXY_USERNAME}:{PROXY_PASSWORD}@{PROXY_SERVER}"
 
     driver = Driver(
-
         uc=True,
-
         headless=HEADLESS,
-
         undetectable=True,
-
         incognito=True,
-
         guest_mode=True,
-
         do_not_track=True,
-
         disable_gpu=True,
-
         proxy=proxy,
-
         agent=UserAgent().random,
-
         chromium_arg=[
-
             "--disable-dev-shm-usage",
-
             "--no-sandbox",
-
             "--disable-blink-features=AutomationControlled",
-
             "--disable-popup-blocking",
-
             "--disable-notifications",
-
             "--disable-infobars",
-
-            "--window-size=1400,900",
+            "--window-size=1440,960",
         ]
     )
-
     return driver
+
 
 # ==========================================================
 # CAPTCHA / RATE LIMIT
 # ==========================================================
-
 def is_rate_limited(driver):
-
     try:
-
-        current_url = safe_string(
-            driver.current_url
-        ).lower()
-
-        source = safe_string(
-            driver.page_source
-        ).lower()
-
-        keywords = [
-
-            "captcha",
-            "recaptcha",
-            "unusual traffic",
-            "not a robot",
-            "/sorry/"
-        ]
-
-        for keyword in keywords:
-
-            if keyword in current_url:
-                return True
-
-            if keyword in source:
-                return True
-
-        return False
-
+        current_url = safe_string(driver.current_url).lower()
+        source = safe_string(driver.page_source).lower()
+        keywords = ["captcha", "recaptcha", "unusual traffic", "not a robot", "/sorry/"]
+        return any(kw in current_url or kw in source for kw in keywords)
     except Exception:
         return False
+
 
 # ==========================================================
 # HUMAN WARMUP
 # ==========================================================
-
 def warmup_session(driver):
-
     try:
-
-        logger.info(
-            "🔥 WARMING SESSION"
-        )
-
-        driver.get(
-            "https://www.google.com"
-        )
-
+        logger.info("🔥 WARMING SESSION")
+        driver.get("https://www.google.com")
         time.sleep(5)
-
-        driver.execute_script(
-            "window.scrollBy(0, 400);"
-        )
-
+        driver.execute_script("window.scrollBy(0, 400);")
         time.sleep(2)
-
-        driver.execute_script(
-            "window.scrollBy(0, -200);"
-        )
-
+        driver.execute_script("window.scrollBy(0, -200);")
         time.sleep(2)
-
     except Exception as e:
+        logger.exception(f"❌ WARMUP FAILED: {e}")
 
-        logger.exception(
-            f"❌ WARMUP FAILED: {e}"
-        )
 
 # ==========================================================
-# CLICK SEARCH RESULT
+# CLICK SEARCH RESULT (Improved)
 # ==========================================================
-
 def click_first_search_result(driver):
-
-    logger.info(
-        "📦 CLICKING SEARCH RESULT"
-    )
-
+    logger.info("📦 CLICKING SEARCH RESULT")
     selectors = [
-
-        'a.hfpxzc',
-
-        'div[role="article"] a',
-
-        'a[jsaction]',
-
-        'a[href*="/maps/place/"]',
-
-        'div.Nv2PK a'
+        'a.hfpxzc', 'div.Nv2PK a', 'div[role="article"]',
+        'a[href*="/maps/place/"]', 'a[jsaction]'
     ]
 
     for selector in selectors:
-
         try:
-
-            results = driver.find_elements(
-                "css selector",
-                selector
+            WebDriverWait(driver, 12).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, selector))
             )
-
-            logger.info(
-                f"📦 RESULTS FOUND ({selector}): {len(results)}"
-            )
-
+            results = driver.find_elements("css selector", selector)
             if not results:
                 continue
 
             first = results[0]
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", first)
+            time.sleep(1.5)
+            driver.execute_script("arguments[0].click();", first)
 
-            try:
-
-                driver.execute_script(
-                    "arguments[0].click();",
-                    first
-                )
-
-            except Exception:
-
-                try:
-
-                    first.click()
-
-                except Exception:
-
-                    try:
-
-                        first.send_keys("\n")
-
-                    except Exception:
-                        pass
-
-            logger.info(
-                "✅ SEARCH RESULT CLICKED"
-            )
-
-            time.sleep(10)
-
+            logger.info("✅ SEARCH RESULT CLICKED")
+            time.sleep(9)
             return True
-
         except Exception as e:
-
-            logger.exception(
-                f"❌ SEARCH CLICK FAILED: {e}"
-            )
-
+            logger.debug(f"Selector {selector} failed: {e}")
+            continue
     return False
 
-# ==========================================================
-# OPEN REVIEWS PANEL
-# ==========================================================
 
 # ==========================================================
-# OPEN REVIEWS PANEL
+# OPEN REVIEWS PANEL (World-Class Smart Version)
 # ==========================================================
-
 def open_reviews_panel(driver):
+    logger.info("📦 OPENING REVIEWS PANEL")
+    time.sleep(12)
 
-    logger.info(
-        "📦 OPENING REVIEWS PANEL"
-    )
+    # Smart selectors in priority order
+    smart_selectors = [
+        "button[aria-label*='Reviews']",
+        "button[data-value='Reviews']",
+        "//button[contains(translate(text(),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'), 'review')]",
+        "//div[contains(@role,'tab')]//span[contains(text(),'Reviews')]",
+        "button span:contains('Reviews')",
+    ]
 
-    time.sleep(15)
-
-    try:
-
-        elements = driver.find_elements(
-
-            "css selector",
-
-            "button, div, span, a"
-        )
-
-        logger.info(
-            f"📦 TOTAL CLICKABLE ELEMENTS: {len(elements)}"
-        )
-
-        for idx, element in enumerate(elements):
-
-            try:
-
-                text = safe_string(
-                    element.text
-                ).lower()
-
-                aria = safe_string(
-                    element.get_attribute(
-                        "aria-label"
-                    )
-                ).lower()
-
-                title = safe_string(
-                    element.get_attribute(
-                        "title"
-                    )
-                ).lower()
-
-                combined = (
-                    f"{text} {aria} {title}"
-                ).lower()
-
-                if not combined.strip():
-                    continue
-
-                logger.info(
-                    f"🔍 ELEMENT [{idx}]: {combined[:100]}"
+    for selector in smart_selectors:
+        try:
+            if selector.startswith("//"):
+                elem = WebDriverWait(driver, 10).until(
+                    EC.element_to_be_clickable((By.XPATH, selector))
+                )
+            else:
+                elem = WebDriverWait(driver, 10).until(
+                    EC.element_to_be_clickable((By.CSS_SELECTOR, selector))
                 )
 
-                if (
-                    "review" in combined
-                    or "reviews" in combined
-                    or "rating" in combined
-                ):
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", elem)
+            time.sleep(1.8)
+            driver.execute_script("arguments[0].click();", elem)
 
-                    logger.info(
-                        f"✅ REVIEW ELEMENT FOUND: {combined}"
-                    )
+            logger.info("✅ REVIEWS PANEL OPENED")
+            time.sleep(8)
 
-                    try:
+            # Verify feed
+            if driver.find_elements("css selector", 'div[role="feed"]'):
+                logger.info("✅ REVIEW FEED VERIFIED")
+                return True
+        except Exception:
+            continue
 
-                        driver.execute_script(
-                            """
-                            arguments[0].scrollIntoView({
-                                behavior: 'smooth',
-                                block: 'center'
-                            });
-                            """,
-                            element
-                        )
-
-                        time.sleep(2)
-
-                    except Exception:
-                        pass
-
-                    clicked = False
-
-                    click_methods = [
-
-                        lambda: driver.execute_script(
-                            "arguments[0].click();",
-                            element
-                        ),
-
-                        lambda: element.click(),
-
-                        lambda: element.send_keys("\\n")
-                    ]
-
-                    for method in click_methods:
-
-                        try:
-
-                            method()
-
-                            clicked = True
-
-                            logger.info(
-                                "✅ REVIEW BUTTON CLICKED"
-                            )
-
-                            break
-
-                        except Exception:
-                            continue
-
-                    if not clicked:
-                        continue
-
-                    time.sleep(10)
-
-                    feed = driver.find_elements(
-
-                        "css selector",
-
-                        'div[role="feed"]'
-                    )
-
-                    if feed:
-
-                        logger.info(
-                            "✅ REVIEW FEED VERIFIED"
-                        )
-
+    # Fallback: Brute force with smart filtering
+    logger.warning("⚠️ Smart selectors failed, using optimized fallback")
+    try:
+        elements = driver.find_elements("css selector", "button, div[role='tab'], span")
+        for element in elements[:80]:   # Limited for performance
+            try:
+                text = safe_string(element.text).lower()
+                aria = safe_string(element.get_attribute("aria-label")).lower()
+                if any(word in text or word in aria for word in ["review", "reviews", "bewertungen", "reseñas"]):
+                    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
+                    time.sleep(1.5)
+                    driver.execute_script("arguments[0].click();", element)
+                    time.sleep(8)
+                    if driver.find_elements("css selector", 'div[role="feed"]'):
                         return True
-
-            except Exception:
+            except:
                 continue
-
     except Exception as e:
+        logger.exception(f"❌ REVIEW PANEL FALLBACK FAILED: {e}")
 
-        logger.exception(
-            f"❌ REVIEW PANEL ERROR: {e}"
-        )
-
-    logger.warning(
-        "⚠️ REVIEWS BUTTON NOT FOUND"
-    )
-
+    logger.warning("⚠️ REVIEWS BUTTON NOT FOUND")
     return False
+
 
 # ==========================================================
 # EXPAND MORE BUTTONS
 # ==========================================================
-
 def expand_review_buttons(driver):
-
     selectors = [
-
         "button.w8nwRe",
-        "button[jsaction*='pane.review.expandReview']"
+        "button[jsaction*='expandReview']",
+        "button[aria-label*='More']"
     ]
-
     for selector in selectors:
-
         try:
-
-            buttons = driver.find_elements(
-                "css selector",
-                selector
-            )
-
+            buttons = driver.find_elements("css selector", selector)
             for btn in buttons:
-
                 try:
-
-                    driver.execute_script(
-                        "arguments[0].click();",
-                        btn
-                    )
-
-                except Exception:
+                    driver.execute_script("arguments[0].click();", btn)
+                except:
                     pass
-
-        except Exception:
+        except:
             pass
 
+
 # ==========================================================
-# EXTRACT REVIEWS
+# EXTRACT REVIEWS (Optimized & Cleaner)
 # ==========================================================
-
-def extract_reviews(
-    driver,
-    target_limit=500
-):
-
-    logger.info(
-        "📦 STARTING REVIEW EXTRACTION"
-    )
-
+def extract_reviews(driver, target_limit=500):
+    logger.info("📦 STARTING REVIEW EXTRACTION")
     reviews = []
-
     seen_ids = set()
 
     try:
-
-        scroll_container = driver.find_element(
-
-            "css selector",
-
-            'div[role="feed"]'
+        scroll_container = WebDriverWait(driver, 15).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, 'div[role="feed"], div[aria-label*="Reviews"]'))
         )
-
-    except Exception as e:
-
-        logger.exception(
-            f"❌ REVIEW FEED NOT FOUND: {e}"
-        )
-
+    except Exception:
+        logger.error("❌ REVIEW FEED NOT FOUND")
         return reviews
 
     idle_scrolls = 0
     previous_count = 0
 
-    for attempt in range(
-        MAX_SCROLL_ATTEMPTS
-    ):
-
+    for attempt in range(MAX_SCROLL_ATTEMPTS):
         try:
-
-            logger.info(
-                f"📦 SCROLL ATTEMPT: {attempt}"
-            )
-
-            logger.info(
-                f"🌐 PAGE TITLE: {driver.title}"
-            )
-
-            logger.info(
-                f"🌐 CURRENT URL: {driver.current_url}"
-            )
-
-            logger.info(
-                f"🌐 PAGE SOURCE LENGTH: {len(driver.page_source)}"
-            )
+            expand_review_buttons(driver)
 
             cards = driver.find_elements(
-
                 "css selector",
-
-                'div[data-review-id], div.jftiEf, div[role="article"]'
-            )
-
-            logger.info(
-                f"📦 REVIEW CARDS FOUND: {len(cards)}"
+                'div.jftiEf, div[data-review-id], article'
             )
 
             for card in cards:
-
                 try:
-
+                    # Author
                     author = ""
-                    review_text = ""
-                    rating = 5
-
-                    # AUTHOR
-                    author_selectors = [
-
-                        ".d4r55",
-                        ".TSUbDb",
-                        "span[class*='d4r55']"
-                    ]
-
-                    for selector in author_selectors:
-
+                    for sel in [".d4r55", ".TSUbDb", "span.d4r55"]:
                         try:
-
-                            author_elem = card.find_element(
-                                "css selector",
-                                selector
-                            )
-
-                            author = safe_string(
-                                author_elem.text
-                            )
-
+                            author = safe_string(card.find_element("css selector", sel).text)
                             if author:
                                 break
-
-                        except Exception:
+                        except:
                             pass
 
-                    # REVIEW TEXT
-                    text_selectors = [
-
-                        ".wiI7pd",
-                        ".MyEned",
-                        "span[class*='wiI7pd']",
-                        "span[jscontroller]"
-                    ]
-
-                    for selector in text_selectors:
-
+                    # Text
+                    review_text = ""
+                    for sel in [".wiI7pd", ".MyEned", "span.wiI7pd"]:
                         try:
-
-                            text_elem = card.find_element(
-                                "css selector",
-                                selector
-                            )
-
                             review_text = clean_review_text(
-                                text_elem.text
+                                card.find_element("css selector", sel).text
                             )
-
                             if review_text:
                                 break
-
-                        except Exception:
+                        except:
                             pass
 
                     if not review_text:
                         continue
 
-                    # RATING
-                    rating_selectors = [
-
-                        "span[aria-label*='star']",
-                        "span.kvMYJc"
-                    ]
-
-                    for selector in rating_selectors:
-
+                    # Rating
+                    rating = 5
+                    for sel in ["span[aria-label*='star']", "span.kvMYJc"]:
                         try:
-
-                            rating_elem = card.find_element(
-                                "css selector",
-                                selector
-                            )
-
-                            rating_label = rating_elem.get_attribute(
-                                "aria-label"
-                            )
-
-                            rating = normalize_rating(
-                                rating_label
-                            )
-
+                            rating_label = card.find_element("css selector", sel).get_attribute("aria-label")
+                            rating = normalize_rating(rating_label)
                             break
-
-                        except Exception:
+                        except:
                             pass
 
-                    review_id = generate_hash(
-                        author,
-                        review_text
-                    )
-
+                    review_id = generate_hash(author, review_text)
                     if review_id in seen_ids:
                         continue
 
-                    seen_ids.add(
-                        review_id
-                    )
-
+                    seen_ids.add(review_id)
                     reviews.append({
-
-                        "review_id":
-                            review_id,
-
-                        "author_name":
-                            author,
-
-                        "rating":
-                            rating,
-
-                        "text":
-                            review_text
+                        "review_id": review_id,
+                        "author_name": author or "Anonymous",
+                        "rating": rating,
+                        "text": review_text
                     })
+                except:
+                    continue
 
-                except Exception as review_error:
-
-                    logger.exception(
-                        f"❌ REVIEW PARSE FAILED: {review_error}"
-                    )
-
-            logger.info(
-                f"✅ TOTAL REVIEWS: {len(reviews)}"
-            )
+            logger.info(f"✅ TOTAL REVIEWS: {len(reviews)} | Attempt: {attempt}")
 
             if len(reviews) >= target_limit:
-
-                logger.info(
-                    f"🎯 TARGET LIMIT REACHED: {target_limit}"
-                )
-
+                logger.info(f"🎯 TARGET LIMIT REACHED: {target_limit}")
                 break
 
-            expand_review_buttons(
-                driver
-            )
-
-            # ==============================================
-            # HUMAN SCROLL
-            # ==============================================
-
+            # Human-like scroll
             driver.execute_script(
-                """
-                arguments[0].scrollBy(
-                    0,
-                    3000
-                );
-                """,
-                scroll_container
+                "arguments[0].scrollBy(0, 2800);", scroll_container
             )
+            time.sleep(random.uniform(SCROLL_PAUSE_MIN, SCROLL_PAUSE_MAX))
 
-            time.sleep(
-
-                random.uniform(
-                    SCROLL_PAUSE_MIN,
-                    SCROLL_PAUSE_MAX
-                )
-            )
-
-            current_count = len(
-                reviews
-            )
-
+            current_count = len(reviews)
             if current_count == previous_count:
-
                 idle_scrolls += 1
-
             else:
-
                 idle_scrolls = 0
-
             previous_count = current_count
 
             if idle_scrolls >= MAX_IDLE_SCROLLS:
-
-                logger.warning(
-                    "⚠️ SCROLL IDLE LIMIT REACHED"
-                )
-
+                logger.warning("⚠️ SCROLL IDLE LIMIT REACHED")
                 break
 
         except Exception as e:
-
-            logger.exception(
-                f"❌ SCROLL FAILED: {e}"
-            )
+            logger.exception(f"❌ SCROLL FAILED: {e}")
 
     gc.collect()
-
     return reviews
+
 
 # ==========================================================
 # MAIN SCRAPER
 # ==========================================================
-
 @retry(
     stop=stop_after_attempt(3),
-    wait=wait_exponential(
-        multiplier=2,
-        min=2,
-        max=15
-    )
+    wait=wait_exponential(multiplier=2, min=3, max=20)
 )
 async def scrape_google_reviews(
     business_name: str,
     target_limit: int = 500
 ):
-
     driver = None
-
     try:
-
         driver = create_driver()
 
-        logger.info(
-            f"🌐 DRIVER TITLE: {driver.title}"
-        )
+        logger.info("🌐 VERIFYING PROXY")
+        driver.get("https://api.ipify.org")
+        logger.info(f"🌐 ACTIVE IP: {driver.page_source.strip()[:120]}")
 
-        # ==============================================
-        # VERIFY PROXY
-        # ==============================================
+        warmup_session(driver)
 
-        logger.info(
-            "🌐 VERIFYING PROXY"
-        )
-
-        driver.get(
-            "https://api.ipify.org"
-        )
-
-        logger.info(
-            f"🌐 ACTIVE IP: {driver.page_source}"
-        )
-
-        # ==============================================
-        # WARMUP
-        # ==============================================
-
-        warmup_session(
-            driver
-        )
-
-        # ==============================================
-        # SEARCH NAVIGATION
-        # ==============================================
-
-        search_url = build_google_maps_search_url(
-            business_name
-        )
-
-        logger.info(
-            f"🌐 SEARCH URL: {search_url}"
-        )
-
-        driver.get(
-            search_url
-        )
-
+        search_url = build_google_maps_search_url(business_name)
+        logger.info(f"🌐 SEARCH URL: {search_url}")
+        driver.get(search_url)
         time.sleep(10)
 
-        logger.info(
-            f"🌐 CURRENT URL: {driver.current_url}"
-        )
-
-        logger.info(
-            f"🌐 PAGE TITLE: {driver.title}"
-        )
-
-        # ==============================================
-        # CAPTCHA CHECK
-        # ==============================================
-
         if is_rate_limited(driver):
-
-            logger.warning(
-                "⚠️ GOOGLE RATE LIMITED"
-            )
-
-            time.sleep(60)
-
+            logger.warning("⚠️ GOOGLE RATE LIMITED")
+            time.sleep(70)
             return []
 
-        # ==============================================
-        # CLICK RESULT
-        # ==============================================
-
-        clicked = click_first_search_result(
-            driver
-        )
-
+        clicked = click_first_search_result(driver)
         if not clicked:
-
-            logger.warning(
-                "⚠️ SEARCH RESULT CLICK FAILED"
-            )
-
+            logger.warning("⚠️ SEARCH RESULT CLICK FAILED")
             return []
 
-        logger.info(
-            f"🌐 PAGE TITLE AFTER CLICK: {driver.title}"
-        )
-
-        # ==============================================
-        # OPEN REVIEWS
-        # ==============================================
-
-        opened = open_reviews_panel(
-            driver
-        )
-
+        opened = open_reviews_panel(driver)
         if not opened:
-
-            logger.warning(
-                "⚠️ REVIEWS PANEL FAILED"
-            )
-
+            logger.warning("⚠️ REVIEWS PANEL FAILED")
             return []
 
-        # ==============================================
-        # EXTRACT REVIEWS
-        # ==============================================
-
-        reviews = extract_reviews(
-
-            driver,
-
-            target_limit=target_limit
-        )
-
-        logger.info(
-            f"✅ SCRAPED REVIEWS: {len(reviews)}"
-        )
-
+        reviews = extract_reviews(driver, target_limit=target_limit)
+        logger.info(f"✅ SCRAPED REVIEWS: {len(reviews)}")
         return reviews
 
     except Exception as e:
-
-        logger.exception(
-            f"❌ SCRAPER FAILED: {e}"
-        )
-
-        logger.error(
-            traceback.format_exc()
-        )
-
+        logger.exception(f"❌ SCRAPER FAILED: {e}")
+        logger.error(traceback.format_exc())
         return []
-
     finally:
-
         try:
-
             if driver:
-
                 driver.quit()
-
         except Exception:
             pass
 
-# ==========================================================
-# FETCH REVIEWS
-# ==========================================================
 
+# ==========================================================
+# FETCH REVIEWS + ANALYTICS SERVICE (Unchanged)
+# ==========================================================
 async def fetch_reviews_from_google(
-
     business_name: str,
-
     company_id: int,
-
     session: AsyncSession,
-
     target_limit: int = 500
 ):
-
-    logger.info(
-        f"🚀 FETCH REVIEWS STARTED | company={company_id}"
-    )
-
+    logger.info(f"🚀 FETCH REVIEWS STARTED | company={company_id}")
     try:
-
         reviews = await scrape_google_reviews(
-
             business_name=business_name,
-
             target_limit=target_limit
         )
-
         if not reviews:
-
-            logger.warning(
-                "⚠️ NO REVIEWS SCRAPED"
-            )
-
+            logger.warning("⚠️ NO REVIEWS SCRAPED")
             return []
 
-        existing_reviews = await get_existing_reviews(
-
-            session=session,
-
-            company_id=company_id
-        )
-
+        existing_reviews = await get_existing_reviews(session, company_id)
         inserted_reviews = []
 
         for idx, item in enumerate(reviews):
-
             try:
-
-                normalized = normalize_review(
-
-                    item=item,
-
-                    company_id=company_id
-                )
-
+                normalized = normalize_review(item, company_id)
                 if not normalized:
                     continue
 
-                google_review_id = normalized[
-                    "google_review_id"
-                ]
-
-                if google_review_id in existing_reviews:
+                if normalized["google_review_id"] in existing_reviews:
                     continue
 
                 review = Review(
-
                     company_id=company_id,
-
-                    google_review_id=normalized[
-                        "google_review_id"
-                    ],
-
-                    author_name=normalized[
-                        "author_name"
-                    ],
-
-                    rating=normalized[
-                        "rating"
-                    ],
-
-                    text=normalized[
-                        "text"
-                    ],
-
-                    google_review_time=normalized[
-                        "google_review_time"
-                    ],
-
-                    review_likes=normalized[
-                        "review_likes"
-                    ],
-
-                    sentiment_score=normalized[
-                        "sentiment_score"
-                    ]
+                    google_review_id=normalized["google_review_id"],
+                    author_name=normalized["author_name"],
+                    rating=normalized["rating"],
+                    text=normalized["text"],
+                    google_review_time=normalized["google_review_time"],
+                    review_likes=normalized["review_likes"],
+                    sentiment_score=normalized["sentiment_score"]
                 )
-
                 session.add(review)
-
-                inserted_reviews.append({
-
-                    "google_review_id":
-                        normalized[
-                            "google_review_id"
-                        ],
-
-                    "author_name":
-                        normalized[
-                            "author_name"
-                        ],
-
-                    "rating":
-                        normalized[
-                            "rating"
-                        ],
-
-                    "text":
-                        normalized[
-                            "text"
-                        ]
-                })
+                inserted_reviews.append(normalized)
 
                 if idx % 50 == 0:
-
                     await session.commit()
-
             except Exception as row_error:
+                logger.exception(f"❌ SAVE REVIEW FAILED: {row_error}")
 
-                logger.exception(
-                    f"❌ SAVE REVIEW FAILED: {row_error}"
-                )
-
-        try:
-
-            await session.commit()
-
-        except Exception as commit_error:
-
-            logger.exception(
-                f"❌ FINAL DB COMMIT FAILED: {commit_error}"
-            )
-
-            await session.rollback()
-
-            return []
-
-        logger.info(
-            f"✅ INSERTED REVIEWS: {len(inserted_reviews)}"
-        )
-
+        await session.commit()
+        logger.info(f"✅ INSERTED REVIEWS: {len(inserted_reviews)}")
         return inserted_reviews
 
     except Exception as e:
-
-        logger.exception(
-            f"❌ FETCH FAILED: {e}"
-        )
-
-        logger.error(
-            traceback.format_exc()
-        )
-
-        try:
-            await session.rollback()
-        except Exception:
-            pass
-
+        logger.exception(f"❌ FETCH FAILED: {e}")
+        await session.rollback()
         return []
 
-# ==========================================================
-# ANALYTICS SERVICE
-# ==========================================================
 
 class ReviewService:
-
     @staticmethod
     async def get_latest_reviews(
-
         db: AsyncSession,
-
         company_id: int,
-
         limit: int = 50
     ):
-
         stmt = (
-
             select(Review)
-
-            .where(
-                Review.company_id == company_id
-            )
-
-            .order_by(
-                desc(Review.created_at)
-            )
-
+            .where(Review.company_id == company_id)
+            .order_by(desc(Review.created_at))
             .limit(limit)
         )
-
-        result = await db.execute(
-            stmt
-        )
-
+        result = await db.execute(stmt)
         return result.scalars().all()
 
     @staticmethod
-    async def get_total_reviews(
-
-        db: AsyncSession,
-
-        company_id: int
-    ):
-
-        stmt = (
-
-            select(
-                func.count(Review.id)
-            )
-
-            .where(
-                Review.company_id == company_id
-            )
-        )
-
-        result = await db.execute(
-            stmt
-        )
-
+    async def get_total_reviews(db: AsyncSession, company_id: int):
+        stmt = select(func.count(Review.id)).where(Review.company_id == company_id)
+        result = await db.execute(stmt)
         return result.scalar() or 0
 
     @staticmethod
-    async def get_average_rating(
-
-        db: AsyncSession,
-
-        company_id: int
-    ):
-
-        stmt = (
-
-            select(
-                func.avg(Review.rating)
-            )
-
-            .where(
-                Review.company_id == company_id
-            )
-        )
-
-        result = await db.execute(
-            stmt
-        )
-
+    async def get_average_rating(db: AsyncSession, company_id: int):
+        stmt = select(func.avg(Review.rating)).where(Review.company_id == company_id)
+        result = await db.execute(stmt)
         avg = result.scalar()
-
-        if avg is None:
-            return 0
-
-        return round(
-            float(avg),
-            2
-        )
+        return round(float(avg), 2) if avg else 0
