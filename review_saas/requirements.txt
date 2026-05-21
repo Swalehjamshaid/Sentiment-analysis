@@ -196,3 +196,5 @@ idna==3.10
 scikit-learn==1.5.2
 vaderSentiment==3.3.2
 numpy==1.26.4
+
+resend==2.4.0
