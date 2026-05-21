@@ -1,7 +1,8 @@
 # ==========================================================
 # FILE: app/main.py
-# TRUSTLYTICS AI — FINAL COMPLETE RAILWAY STABLE MAIN.PY
-# MAY 2026 ENTERPRISE VERSION
+# TRUSTLYTICS AI — FINAL ENTERPRISE STABLE MAIN.PY
+# RAILWAY + FASTAPI + PLAYWRIGHT + AI SAFE VERSION
+# MAY 2026
 # ==========================================================
 
 import os
@@ -48,7 +49,7 @@ logging.basicConfig(level=logging.INFO)
 logger.info("✅ LOGGER INITIALIZED")
 
 # ==========================================================
-# BASE DIR
+# BASE DIRECTORY
 # ==========================================================
 
 BASE_DIR = os.path.dirname(
@@ -74,6 +75,7 @@ except Exception as e:
     traceback.print_exc()
 
     class DummySettings:
+
         SECRET_KEY = "railway-secret"
 
     settings = DummySettings()
@@ -83,16 +85,20 @@ except Exception as e:
 # ==========================================================
 
 init_models = None
+check_database_connection = None
 
 try:
 
-    from app.core.db import init_models
+    from app.core.db import (
+        init_models,
+        check_database_connection
+    )
 
     print("✅ DATABASE MODULE IMPORTED")
 
 except Exception as e:
 
-    print("❌ DATABASE MODULE FAILED")
+    print("❌ DATABASE IMPORT FAILED")
     print(str(e))
     traceback.print_exc()
 
@@ -106,40 +112,76 @@ async def lifespan(app: FastAPI):
     logger.info("🚀 APPLICATION STARTUP")
 
     # ======================================================
-    # SAFE DATABASE INIT
+    # DATABASE HEALTH CHECK
     # ======================================================
 
-    if init_models:
+    try:
 
-        try:
+        if check_database_connection:
 
-            logger.info("📦 DATABASE INIT STARTED")
+            db_ok = await check_database_connection()
 
-            # ==================================================
-            # IMPORTANT:
-            # IF DATABASE CAUSES FREEZE,
-            # COMMENT THIS AGAIN
-            # ==================================================
+            if db_ok:
+
+                logger.success(
+                    "✅ DATABASE CONNECTION HEALTHY"
+                )
+
+            else:
+
+                logger.warning(
+                    "⚠️ DATABASE CONNECTION FAILED"
+                )
+
+    except Exception as e:
+
+        logger.error(
+            f"❌ DATABASE HEALTH CHECK FAILED: {e}"
+        )
+
+    # ======================================================
+    # DATABASE INITIALIZATION
+    # ======================================================
+
+    try:
+
+        if init_models:
+
+            logger.info(
+                "📦 DATABASE INIT STARTED"
+            )
 
             await init_models()
 
-            logger.success("✅ DATABASE INITIALIZED")
+            logger.success(
+                "✅ DATABASE INITIALIZED"
+            )
 
-        except Exception as e:
+        else:
 
-            logger.error("❌ DATABASE INIT FAILED")
-            logger.error(str(e))
-            logger.error(traceback.format_exc())
+            logger.warning(
+                "⚠️ DATABASE INIT SKIPPED"
+            )
 
-    else:
+    except Exception as e:
 
-        logger.warning("⚠️ DATABASE INIT SKIPPED")
+        logger.error(
+            f"❌ DATABASE INIT FAILED: {e}"
+        )
 
-    logger.success("✅ APPLICATION STARTUP COMPLETE")
+        logger.error(
+            traceback.format_exc()
+        )
+
+    logger.success(
+        "✅ APPLICATION STARTUP COMPLETE"
+    )
 
     yield
 
-    logger.info("🛑 APPLICATION SHUTDOWN")
+    logger.info(
+        "🛑 APPLICATION SHUTDOWN"
+    )
 
 # ==========================================================
 # FASTAPI APP
@@ -149,7 +191,7 @@ app = FastAPI(
 
     title="Trustlytics AI",
 
-    description="AI Reputation Intelligence SaaS",
+    description="Enterprise AI Reputation Intelligence Platform",
 
     version="3.0.0",
 
@@ -168,16 +210,22 @@ async def global_exception_handler(
     exc: Exception
 ):
 
-    logger.error(f"❌ GLOBAL ERROR: {request.url}")
+    logger.error(
+        f"❌ GLOBAL ERROR: {request.url}"
+    )
 
-    logger.error(traceback.format_exc())
+    logger.error(
+        traceback.format_exc()
+    )
 
     return JSONResponse(
 
         status_code=500,
 
         content={
-            "status": "error",
+
+            "success": False,
+
             "message": str(exc)
         }
     )
@@ -266,7 +314,9 @@ if os.path.exists(STATIC_DIR):
 
         "/static",
 
-        StaticFiles(directory=STATIC_DIR),
+        StaticFiles(
+            directory=STATIC_DIR
+        ),
 
         name="static"
     )
@@ -286,11 +336,13 @@ async def root():
 
     return {
 
-        "status": "running",
+        "success": True,
 
         "service": "Trustlytics AI",
 
-        "version": "3.0.0"
+        "version": "3.0.0",
+
+        "status": "running"
     }
 
 # ==========================================================
@@ -302,39 +354,43 @@ async def health_check():
 
     return {
 
+        "success": True,
+
         "status": "healthy",
 
         "timestamp": datetime.utcnow().isoformat()
     }
 
 # ==========================================================
-# SAFE ROUTER LOADER
+# ROUTE LOADER
 # ==========================================================
 
 ROUTES = [
 
-    ("auth", "/api/auth"),
+    "auth",
 
-    ("companies", "/api"),
+    "companies",
 
-    ("dashboard", "/api"),
+    "dashboard",
 
-    ("reviews", "/api"),
+    "reviews",
 
-    ("chatbot", "/api"),
+    "chatbot",
 
-    ("reports", "")
+    "reports"
 ]
 
 # ==========================================================
-# ROUTER REGISTRATION
+# SAFE ROUTER REGISTRATION
 # ==========================================================
 
-for route_name, prefix in ROUTES:
+for route_name in ROUTES:
 
     try:
 
-        logger.info(f"📦 Loading Route: {route_name}")
+        logger.info(
+            f"📦 LOADING ROUTE: {route_name}"
+        )
 
         module = __import__(
 
@@ -343,18 +399,22 @@ for route_name, prefix in ROUTES:
             fromlist=["router"]
         )
 
-        router = getattr(module, "router")
-
-        app.include_router(
-            router,
-            prefix=prefix
+        router = getattr(
+            module,
+            "router"
         )
 
-        print(f"✅ {route_name.upper()} ROUTER REGISTERED")
+        app.include_router(router)
+
+        print(
+            f"✅ {route_name.upper()} ROUTER REGISTERED"
+        )
 
     except Exception as e:
 
-        print(f"❌ {route_name.upper()} ROUTER FAILED")
+        print(
+            f"❌ {route_name.upper()} ROUTER FAILED"
+        )
 
         print(str(e))
 
