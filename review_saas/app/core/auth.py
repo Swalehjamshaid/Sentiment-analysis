@@ -2,7 +2,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-
 from app.core.db import get_db
 from app.core.models import User
 from app.core.security import get_password_hash, create_verification_token, decode_verification_token
