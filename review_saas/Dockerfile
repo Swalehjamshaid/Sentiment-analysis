@@ -1,20 +1,17 @@
 # ==========================================================
-# TRUSTLYTICS AI — RAILWAY PRODUCTION DOCKERFILE
-# MAY 2026 OPTIMIZED ENTERPRISE VERSION
+# TRUSTLYTICS AI — ULTRA STABLE RAILWAY DOCKERFILE
+# MAY 2026 PRODUCTION SAFE VERSION
 #
-# SUPPORTS:
-# ✅ FASTAPI
-# ✅ PLAYWRIGHT
-# ✅ CAMOUFOX
-# ✅ GOOGLE MAPS SCRAPING
-# ✅ CHROMIUM
-# ✅ STEALTH BROWSERS
-# ✅ AI CHATBOT
-# ✅ RAG SYSTEM
-# ✅ PDF REPORTING
-# ✅ RAILWAY DEPLOYMENT
-# ✅ MEMORY OPTIMIZED
-# ✅ LIGHTWEIGHT BUILD
+# GOALS:
+# ✅ Railway Stable
+# ✅ No Memory Crash
+# ✅ FastAPI
+# ✅ Playwright
+# ✅ Google Maps Scraping
+# ✅ AI Chatbot
+# ✅ PDF Reporting
+# ✅ Lightweight Chromium
+# ✅ Production Optimized
 # ==========================================================
 
 FROM python:3.11-slim
@@ -37,23 +34,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 # ==========================================================
-# INSTALL SYSTEM DEPENDENCIES
+# INSTALL ONLY ESSENTIAL SYSTEM PACKAGES
 # ==========================================================
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    gcc \
-    g++ \
     curl \
     wget \
-    unzip \
     git \
-    xvfb \
-    ca-certificates \
-    fonts-liberation \
-    xdg-utils \
-    chromium \
-    chromium-driver \
+    gcc \
+    g++ \
+    build-essential \
     libglib2.0-0 \
     libnss3 \
     libnspr4 \
@@ -64,22 +54,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libdrm2 \
     libxkbcommon0 \
     libxcomposite1 \
-    libxcursor1 \
     libxdamage1 \
     libxfixes3 \
     libxrandr2 \
-    libxrender1 \
-    libx11-xcb1 \
-    libxt6 \
-    libxi6 \
     libgbm1 \
     libasound2 \
     libatspi2.0-0 \
-    libxshmfence1 \
     libgtk-3-0 \
+    libxshmfence1 \
     libu2f-udev \
     libvulkan1 \
-    libglu1-mesa \
     libxml2-dev \
     libxslt1-dev \
     zlib1g-dev \
@@ -87,18 +71,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libffi-dev \
     libssl-dev \
     libpq-dev \
-    pkg-config \
+    fonts-liberation \
+    ca-certificates \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
 # ==========================================================
-# UPGRADE PIP TO LATEST STABLE
+# UPGRADE PIP
 # ==========================================================
 
-RUN python -m pip install --upgrade \
-    pip \
-    setuptools \
-    wheel
+RUN python -m pip install --upgrade pip setuptools wheel
 
 # ==========================================================
 # COPY REQUIREMENTS FIRST
@@ -107,41 +89,31 @@ RUN python -m pip install --upgrade \
 COPY requirements.txt .
 
 # ==========================================================
-# INSTALL PYTHON DEPENDENCIES
+# INSTALL PYTHON REQUIREMENTS
 # ==========================================================
 
 RUN pip install --no-cache-dir -r requirements.txt
 
 # ==========================================================
-# INSTALL PLAYWRIGHT BROWSERS
+# INSTALL PLAYWRIGHT ONLY
 # ==========================================================
 
-RUN playwright install --with-deps chromium
-
-# ==========================================================
-# INSTALL CAMOUFOX BROWSER
-# ==========================================================
-
-RUN python -m camoufox fetch || true
+RUN playwright install chromium
 
 # ==========================================================
 # CREATE REQUIRED DIRECTORIES
 # ==========================================================
 
-RUN mkdir -p \
-    /ms-playwright \
-    /tmp \
-    /app/logs \
-    /app/uploads
+RUN mkdir -p /tmp /app/logs /app/uploads
 
 # ==========================================================
-# COPY APPLICATION FILES
+# COPY APPLICATION
 # ==========================================================
 
 COPY . .
 
 # ==========================================================
-# PORT
+# EXPOSE PORT
 # ==========================================================
 
 EXPOSE 8080
@@ -150,21 +122,19 @@ EXPOSE 8080
 # HEALTHCHECK
 # ==========================================================
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-CMD curl -f http://localhost:8080/ || exit 1
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s \
+CMD curl --fail http://localhost:8080/ || exit 1
 
 # ==========================================================
-# GUNICORN SETTINGS
+# GUNICORN CONFIGURATION
 # ==========================================================
 
 ENV GUNICORN_CMD_ARGS="\
---workers=2 \
+--workers=1 \
 --worker-class=uvicorn.workers.UvicornWorker \
+--bind=0.0.0.0:8080 \
 --timeout=300 \
---keep-alive=5 \
---max-requests=1000 \
---max-requests-jitter=50 \
---bind=0.0.0.0:8080"
+--keep-alive=5"
 
 # ==========================================================
 # START APPLICATION
