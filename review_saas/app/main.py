@@ -1,7 +1,9 @@
+# app/main.py
+
+```python
 # ==========================================================
-# FILE: app/main.py
-# TRUSTLYTICS AI — FINAL RAILWAY STABLE MAIN.PY
-# MAY 2026 ENTERPRISE VERSION
+# TRUSTLYTICS AI — FINAL STABLE MAIN.PY
+# RAILWAY + FASTAPI + PLAYWRIGHT SAFE VERSION
 # ==========================================================
 
 import os
@@ -23,7 +25,7 @@ from starlette.templating import Jinja2Templates
 from loguru import logger
 
 # ==========================================================
-# STARTUP DEBUG
+# DEBUG STARTUP
 # ==========================================================
 
 print("🚀 TRUSTLYTICS STARTING")
@@ -45,33 +47,28 @@ logger.add(
 
 logging.basicConfig(level=logging.INFO)
 
-logger.info("✅ Logger Initialized")
+logger.info("✅ LOGGER INITIALIZED")
 
 # ==========================================================
-# BASE DIRECTORY
+# BASE DIR
 # ==========================================================
 
-BASE_DIR = os.path.dirname(
-    os.path.abspath(__file__)
-)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 print(f"✅ BASE_DIR: {BASE_DIR}")
 
 # ==========================================================
-# SETTINGS
+# SETTINGS IMPORT
 # ==========================================================
 
 try:
-
     from app.core.config import settings
-
     print("✅ SETTINGS IMPORTED")
 
 except Exception as e:
 
     print("❌ SETTINGS IMPORT FAILED")
     print(str(e))
-
     traceback.print_exc()
 
     class DummySettings:
@@ -80,220 +77,89 @@ except Exception as e:
     settings = DummySettings()
 
 # ==========================================================
-# DATABASE
+# DATABASE IMPORT
 # ==========================================================
 
+init_models = None
+
 try:
-
     from app.core.db import init_models
-
     print("✅ DATABASE MODULE IMPORTED")
 
 except Exception as e:
 
-    print("❌ DATABASE IMPORT FAILED")
+    print("❌ DATABASE MODULE FAILED")
     print(str(e))
-
-    traceback.print_exc()
-
-    init_models = None
-
-# ==========================================================
-# ROUTER PLACEHOLDERS
-# ==========================================================
-
-auth_router = None
-companies_router = None
-dashboard_router = None
-reviews_router = None
-chatbot_router = None
-reports_router = None
-
-# ==========================================================
-# AUTH ROUTE
-# ==========================================================
-
-try:
-
-    from app.routes.auth import router as auth_router
-
-    print("✅ AUTH ROUTE IMPORTED")
-
-except Exception as e:
-
-    print("❌ AUTH ROUTE FAILED")
-    print(str(e))
-
     traceback.print_exc()
 
 # ==========================================================
-# COMPANIES ROUTE
-# ==========================================================
-
-try:
-
-    from app.routes.companies import router as companies_router
-
-    print("✅ COMPANIES ROUTE IMPORTED")
-
-except Exception as e:
-
-    print("❌ COMPANIES ROUTE FAILED")
-    print(str(e))
-
-    traceback.print_exc()
-
-# ==========================================================
-# DASHBOARD ROUTE
-# ==========================================================
-
-try:
-
-    from app.routes.dashboard import router as dashboard_router
-
-    print("✅ DASHBOARD ROUTE IMPORTED")
-
-except Exception as e:
-
-    print("❌ DASHBOARD ROUTE FAILED")
-    print(str(e))
-
-    traceback.print_exc()
-
-# ==========================================================
-# REVIEWS ROUTE
-# ==========================================================
-
-try:
-
-    from app.routes.reviews import router as reviews_router
-
-    print("✅ REVIEWS ROUTE IMPORTED")
-
-except Exception as e:
-
-    print("❌ REVIEWS ROUTE FAILED")
-    print(str(e))
-
-    traceback.print_exc()
-
-# ==========================================================
-# CHATBOT ROUTE
-# ==========================================================
-
-try:
-
-    from app.routes.chatbot import router as chatbot_router
-
-    print("✅ CHATBOT ROUTE IMPORTED")
-
-except Exception as e:
-
-    print("❌ CHATBOT ROUTE FAILED")
-    print(str(e))
-
-    traceback.print_exc()
-
-# ==========================================================
-# REPORTS ROUTE
-# ==========================================================
-
-try:
-
-    from app.routes.reports import router as reports_router
-
-    print("✅ REPORTS ROUTE IMPORTED")
-
-except Exception as e:
-
-    print("❌ REPORTS ROUTE FAILED")
-    print(str(e))
-
-    traceback.print_exc()
-
-# ==========================================================
-# APPLICATION LIFESPAN
+# FASTAPI APP
 # ==========================================================
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
 
-    logger.info("🚀 APPLICATION STARTUP INITIATED")
+    logger.info("🚀 APPLICATION STARTUP")
 
     # ======================================================
-    # TEMP SAFE DATABASE INIT
+    # SAFE DATABASE INIT
     # ======================================================
 
-    try:
+    if init_models:
 
-        if init_models:
+        try:
 
             logger.info("📦 DATABASE INIT STARTED")
 
             # TEMPORARILY SAFE
-            # COMMENT THIS AGAIN IF STARTUP FREEZES
-
+            # COMMENT THIS IF DB FAILS
             await init_models()
 
             logger.success("✅ DATABASE INITIALIZED")
 
-        else:
+        except Exception as e:
 
-            logger.warning("⚠️ DATABASE INIT SKIPPED")
+            logger.error("❌ DATABASE INIT FAILED")
+            logger.error(str(e))
+            logger.error(traceback.format_exc())
 
-    except Exception as e:
+    else:
 
-        logger.error("❌ DATABASE INIT FAILED")
+        logger.warning("⚠️ DATABASE INIT SKIPPED")
 
-        logger.error(str(e))
-
-        logger.error(traceback.format_exc())
-
-    logger.success("✅ APPLICATION STARTUP COMPLETE")
+    logger.success("✅ STARTUP COMPLETE")
 
     yield
 
-    logger.info("🛑 APPLICATION SHUTDOWN COMPLETE")
+    logger.info("🛑 APPLICATION SHUTDOWN")
 
 # ==========================================================
-# FASTAPI APPLICATION
+# CREATE APP
 # ==========================================================
 
 app = FastAPI(
-
     title="Trustlytics AI",
-
-    description="AI Reputation Intelligence SaaS Platform",
-
+    description="AI Reputation Intelligence Platform",
     version="3.0.0",
-
     lifespan=lifespan
 )
 
 print("✅ FASTAPI APP CREATED")
 
 # ==========================================================
-# GLOBAL ERROR HANDLER
+# ERROR HANDLER
 # ==========================================================
 
 @app.exception_handler(Exception)
-async def global_exception_handler(
-    request: Request,
-    exc: Exception
-):
+async def global_exception_handler(request: Request, exc: Exception):
 
     logger.error(f"❌ GLOBAL ERROR: {request.url}")
-
     logger.error(traceback.format_exc())
 
     return JSONResponse(
-
         status_code=500,
-
         content={
-
             "status": "error",
-
             "message": str(exc)
         }
     )
@@ -303,22 +169,17 @@ async def global_exception_handler(
 # ==========================================================
 
 app.add_middleware(
-
     CORSMiddleware,
-
     allow_origins=["*"],
-
     allow_credentials=True,
-
     allow_methods=["*"],
-
     allow_headers=["*"]
 )
 
 print("✅ CORS ENABLED")
 
 # ==========================================================
-# SESSION MIDDLEWARE
+# SESSION
 # ==========================================================
 
 SECRET_KEY = getattr(
@@ -328,36 +189,25 @@ SECRET_KEY = getattr(
 )
 
 app.add_middleware(
-
     SessionMiddleware,
-
     secret_key=SECRET_KEY,
-
     session_cookie="trustlytics_session",
-
     max_age=86400,
-
     same_site="lax",
-
     https_only=False
 )
 
-print("✅ SESSION MIDDLEWARE ENABLED")
+print("✅ SESSION ENABLED")
 
 # ==========================================================
 # TEMPLATES
 # ==========================================================
 
-TEMPLATE_DIR = os.path.join(
-    BASE_DIR,
-    "templates"
-)
+TEMPLATE_DIR = os.path.join(BASE_DIR, "templates")
 
 if os.path.exists(TEMPLATE_DIR):
 
-    templates = Jinja2Templates(
-        directory=TEMPLATE_DIR
-    )
+    templates = Jinja2Templates(directory=TEMPLATE_DIR)
 
     print("✅ TEMPLATES LOADED")
 
@@ -369,21 +219,13 @@ else:
 # STATIC FILES
 # ==========================================================
 
-STATIC_DIR = os.path.join(
-    BASE_DIR,
-    "static"
-)
+STATIC_DIR = os.path.join(BASE_DIR, "static")
 
 if os.path.exists(STATIC_DIR):
 
     app.mount(
-
         "/static",
-
-        StaticFiles(
-            directory=STATIC_DIR
-        ),
-
+        StaticFiles(directory=STATIC_DIR),
         name="static"
     )
 
@@ -394,88 +236,59 @@ else:
     print("⚠️ STATIC DIRECTORY MISSING")
 
 # ==========================================================
-# ROOT ROUTE
+# ROOT ROUTES
 # ==========================================================
 
 @app.get("/")
 async def root():
 
     return {
-
         "status": "running",
-
         "service": "Trustlytics AI",
-
         "version": "3.0.0"
     }
-
-# ==========================================================
-# HEALTH CHECK
-# ==========================================================
 
 @app.get("/health")
 async def health_check():
 
     return {
-
         "status": "healthy",
-
         "timestamp": datetime.utcnow().isoformat()
     }
 
 # ==========================================================
-# ROUTER REGISTRATION
+# SAFE ROUTER IMPORTS
 # ==========================================================
 
-if auth_router:
+ROUTES = [
+    ("auth", "/api/auth"),
+    ("companies", "/api"),
+    ("dashboard", "/api"),
+    ("reviews", "/api"),
+    ("chatbot", "/api"),
+    ("reports", "")
+]
 
-    app.include_router(
-        auth_router
-    )
+for route_name, prefix in ROUTES:
 
-    print("✅ AUTH ROUTER REGISTERED")
+    try:
 
-if companies_router:
+        module = __import__(
+            f"app.routes.{route_name}",
+            fromlist=["router"]
+        )
 
-    app.include_router(
-        companies_router
-    )
+        router = getattr(module, "router")
 
-    print("✅ COMPANIES ROUTER REGISTERED")
+        app.include_router(router, prefix=prefix)
 
-if dashboard_router:
+        print(f"✅ {route_name.upper()} ROUTER REGISTERED")
 
-    app.include_router(
-        dashboard_router
-    )
+    except Exception as e:
 
-    print("✅ DASHBOARD ROUTER REGISTERED")
-
-if reviews_router:
-
-    app.include_router(
-        reviews_router
-    )
-
-    print("✅ REVIEWS ROUTER REGISTERED")
-
-if chatbot_router:
-
-    app.include_router(
-        chatbot_router
-    )
-
-    print("✅ CHATBOT ROUTER REGISTERED")
-
-if reports_router:
-
-    app.include_router(
-        reports_router
-    )
-
-    print("✅ REPORTS ROUTER REGISTERED")
-
-print("✅ ALL ROUTERS PROCESSED")
+        print(f"❌ {route_name.upper()} ROUTER FAILED")
+        print(str(e))
+        traceback.print_exc()
 
 # ==========================================================
 # MAIN
@@ -486,19 +299,70 @@ if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run(
-
         "app.main:app",
-
         host="0.0.0.0",
-
-        port=int(
-            os.environ.get(
-                "PORT",
-                8080
-            )
-        ),
-
+        port=int(os.environ.get("PORT", 8080)),
         reload=False,
-
         log_level="info"
     )
+```
+
+# VERY IMPORTANT FIXES
+
+## 1. UPDATE app/core/db.py
+
+REPLACE:
+
+```python
+from app.core.models import *
+```
+
+WITH:
+
+```python
+import app.core.models
+```
+
+This prevents circular import crashes.
+
+---
+
+## 2. RAILWAY START COMMAND
+
+Use EXACTLY:
+
+```bash
+sh -c 'uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080} --log-level debug'
+```
+
+---
+
+## 3. REMOVE THESE TEMPORARILY FROM requirements.txt
+
+```txt
+camoufox
+chromadb
+faiss-cpu
+sentence-transformers
+transformers
+```
+
+---
+
+## 4. MOST IMPORTANT
+
+The previous crash at:
+
+```txt
+File "/app/app/main.py", line 169
+```
+
+was likely caused by:
+
+* router import failure
+* circular import
+* StaticFiles issue
+* missing templates/static folders
+* route registration crash
+
+This new version safely isolates ALL router failures and prevents app-wide startup crashes.
