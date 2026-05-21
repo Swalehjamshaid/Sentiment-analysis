@@ -1,13 +1,13 @@
 # ==========================================================
 # FILE: app/main.py
-# TRUSTLYTICS AI — RAILWAY STABLE VERSION
+# TRUSTLYTICS AI — FINAL RAILWAY STABLE VERSION
 # MAY 2026
 # ==========================================================
 
 import os
 import sys
-import traceback
 import logging
+import traceback
 
 from datetime import datetime
 from contextlib import asynccontextmanager
@@ -27,7 +27,7 @@ from loguru import logger
 # ==========================================================
 
 print("🚀 TRUSTLYTICS STARTING")
-print("🐍 PYTHON VERSION:", sys.version)
+print("🐍 PYTHON:", sys.version)
 
 # ==========================================================
 # LOGGING
@@ -51,7 +51,9 @@ logger.info("✅ Logger Initialized")
 # BASE DIRECTORY
 # ==========================================================
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.path.dirname(
+    os.path.abspath(__file__)
+)
 
 print(f"✅ BASE_DIR: {BASE_DIR}")
 
@@ -63,11 +65,11 @@ try:
 
     from app.core.config import settings
 
-    print("✅ Settings Imported")
+    print("✅ Settings Loaded")
 
 except Exception as e:
 
-    print("❌ SETTINGS IMPORT FAILED")
+    print("❌ Settings Import Failed")
     print(str(e))
 
     class DummySettings:
@@ -83,17 +85,19 @@ try:
 
     from app.core.db import init_models
 
-    print("✅ Database Import Successful")
+    print("✅ Database Module Loaded")
 
 except Exception as e:
 
-    print("❌ DATABASE IMPORT FAILED")
+    print("❌ Database Import Failed")
     print(str(e))
+
+    traceback.print_exc()
 
     init_models = None
 
 # ==========================================================
-# ROUTE IMPORTS
+# SAFE ROUTE IMPORTS
 # ==========================================================
 
 auth_router = None
@@ -103,70 +107,94 @@ reviews_router = None
 chatbot_router = None
 reports_router = None
 
+# ----------------------------------------------------------
+
 try:
 
     from app.routes.auth import router as auth_router
+
     print("✅ AUTH ROUTE LOADED")
 
 except Exception as e:
 
     print("❌ AUTH ROUTE FAILED")
     print(str(e))
+
     traceback.print_exc()
+
+# ----------------------------------------------------------
 
 try:
 
     from app.routes.companies import router as companies_router
+
     print("✅ COMPANIES ROUTE LOADED")
 
 except Exception as e:
 
     print("❌ COMPANIES ROUTE FAILED")
     print(str(e))
+
     traceback.print_exc()
+
+# ----------------------------------------------------------
 
 try:
 
     from app.routes.dashboard import router as dashboard_router
+
     print("✅ DASHBOARD ROUTE LOADED")
 
 except Exception as e:
 
     print("❌ DASHBOARD ROUTE FAILED")
     print(str(e))
+
     traceback.print_exc()
+
+# ----------------------------------------------------------
 
 try:
 
     from app.routes.reviews import router as reviews_router
+
     print("✅ REVIEWS ROUTE LOADED")
 
 except Exception as e:
 
     print("❌ REVIEWS ROUTE FAILED")
     print(str(e))
+
     traceback.print_exc()
+
+# ----------------------------------------------------------
 
 try:
 
     from app.routes.chatbot import router as chatbot_router
+
     print("✅ CHATBOT ROUTE LOADED")
 
 except Exception as e:
 
     print("❌ CHATBOT ROUTE FAILED")
     print(str(e))
+
     traceback.print_exc()
+
+# ----------------------------------------------------------
 
 try:
 
     from app.routes.reports import router as reports_router
+
     print("✅ REPORTS ROUTE LOADED")
 
 except Exception as e:
 
     print("❌ REPORTS ROUTE FAILED")
     print(str(e))
+
     traceback.print_exc()
 
 # ==========================================================
@@ -176,10 +204,10 @@ except Exception as e:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
 
-    logger.info("🚀 FastAPI Startup Initiated")
+    logger.info("🚀 Application Startup Initiated")
 
     # ======================================================
-    # DATABASE INIT
+    # SAFE DATABASE INITIALIZATION
     # ======================================================
 
     if init_models:
@@ -202,7 +230,7 @@ async def lifespan(app: FastAPI):
 
         logger.warning("⚠️ Database Init Skipped")
 
-    logger.success("✅ Application Startup Complete")
+    logger.success("✅ FastAPI Startup Complete")
 
     yield
 
@@ -216,7 +244,7 @@ app = FastAPI(
 
     title="Trustlytics AI",
 
-    description="AI Reputation & Review Intelligence Platform",
+    description="AI Reputation Intelligence SaaS",
 
     version="3.0.0",
 
@@ -230,11 +258,18 @@ print("✅ FastAPI App Created")
 # ==========================================================
 
 @app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
+async def global_exception_handler(
+    request: Request,
+    exc: Exception
+):
 
-    logger.error(f"❌ GLOBAL ERROR: {request.url}")
+    logger.error(
+        f"❌ GLOBAL ERROR: {request.url}"
+    )
 
-    logger.error(traceback.format_exc())
+    logger.error(
+        traceback.format_exc()
+    )
 
     return JSONResponse(
 
@@ -281,7 +316,15 @@ app.add_middleware(
 
     SessionMiddleware,
 
-    secret_key=SECRET_KEY
+    secret_key=SECRET_KEY,
+
+    session_cookie="trustlytics_session",
+
+    max_age=86400,
+
+    same_site="lax",
+
+    https_only=False
 )
 
 print("✅ Session Middleware Enabled")
@@ -290,11 +333,16 @@ print("✅ Session Middleware Enabled")
 # TEMPLATES
 # ==========================================================
 
-TEMPLATE_DIR = os.path.join(BASE_DIR, "templates")
+TEMPLATE_DIR = os.path.join(
+    BASE_DIR,
+    "templates"
+)
 
 if os.path.exists(TEMPLATE_DIR):
 
-    templates = Jinja2Templates(directory=TEMPLATE_DIR)
+    templates = Jinja2Templates(
+        directory=TEMPLATE_DIR
+    )
 
     print("✅ Templates Loaded")
 
@@ -306,13 +354,21 @@ else:
 # STATIC FILES
 # ==========================================================
 
-STATIC_DIR = os.path.join(BASE_DIR, "static")
+STATIC_DIR = os.path.join(
+    BASE_DIR,
+    "static"
+)
 
 if os.path.exists(STATIC_DIR):
 
     app.mount(
+
         "/static",
-        StaticFiles(directory=STATIC_DIR),
+
+        StaticFiles(
+            directory=STATIC_DIR
+        ),
+
         name="static"
     )
 
@@ -339,7 +395,7 @@ async def root():
     }
 
 # ==========================================================
-# HEALTH ROUTE
+# HEALTH CHECK
 # ==========================================================
 
 @app.get("/health")
@@ -353,57 +409,46 @@ async def health_check():
     }
 
 # ==========================================================
-# REGISTER ROUTERS
+# ROUTER REGISTRATION
 # ==========================================================
 
 if auth_router:
 
     app.include_router(
-        auth_router,
-        prefix="/api/auth",
-        tags=["Authentication"]
+        auth_router
     )
 
 if companies_router:
 
     app.include_router(
-        companies_router,
-        prefix="/api",
-        tags=["Companies"]
+        companies_router
     )
 
 if dashboard_router:
 
     app.include_router(
-        dashboard_router,
-        prefix="/api",
-        tags=["Dashboard"]
+        dashboard_router
     )
 
 if reviews_router:
 
     app.include_router(
-        reviews_router,
-        prefix="/api",
-        tags=["Reviews"]
+        reviews_router
     )
 
 if chatbot_router:
 
     app.include_router(
-        chatbot_router,
-        prefix="/api",
-        tags=["Chatbot"]
+        chatbot_router
     )
 
 if reports_router:
 
     app.include_router(
-        reports_router,
-        tags=["Reports"]
+        reports_router
     )
 
-print("✅ Router Registration Completed")
+print("✅ Router Registration Complete")
 
 # ==========================================================
 # MAIN
@@ -419,7 +464,12 @@ if __name__ == "__main__":
 
         host="0.0.0.0",
 
-        port=int(os.environ.get("PORT", 8080)),
+        port=int(
+            os.environ.get(
+                "PORT",
+                8080
+            )
+        ),
 
         reload=False,
 
