@@ -1,13 +1,13 @@
 # ==========================================================
 # FILE: app/main.py
-# TRUSTLYTICS AI — FINAL RAILWAY STABLE VERSION
-# MAY 2026
+# TRUSTLYTICS AI — FINAL RAILWAY STABLE MAIN.PY
+# MAY 2026 ENTERPRISE VERSION
 # ==========================================================
 
 import os
 import sys
-import logging
 import traceback
+import logging
 
 from datetime import datetime
 from contextlib import asynccontextmanager
@@ -27,7 +27,7 @@ from loguru import logger
 # ==========================================================
 
 print("🚀 TRUSTLYTICS STARTING")
-print("🐍 PYTHON:", sys.version)
+print("🐍 PYTHON VERSION:", sys.version)
 
 # ==========================================================
 # LOGGING
@@ -58,19 +58,21 @@ BASE_DIR = os.path.dirname(
 print(f"✅ BASE_DIR: {BASE_DIR}")
 
 # ==========================================================
-# SETTINGS IMPORT
+# SETTINGS
 # ==========================================================
 
 try:
 
     from app.core.config import settings
 
-    print("✅ Settings Loaded")
+    print("✅ SETTINGS IMPORTED")
 
 except Exception as e:
 
-    print("❌ Settings Import Failed")
+    print("❌ SETTINGS IMPORT FAILED")
     print(str(e))
+
+    traceback.print_exc()
 
     class DummySettings:
         SECRET_KEY = "railway-secret"
@@ -78,18 +80,18 @@ except Exception as e:
     settings = DummySettings()
 
 # ==========================================================
-# DATABASE IMPORT
+# DATABASE
 # ==========================================================
 
 try:
 
     from app.core.db import init_models
 
-    print("✅ Database Module Loaded")
+    print("✅ DATABASE MODULE IMPORTED")
 
 except Exception as e:
 
-    print("❌ Database Import Failed")
+    print("❌ DATABASE IMPORT FAILED")
     print(str(e))
 
     traceback.print_exc()
@@ -97,7 +99,7 @@ except Exception as e:
     init_models = None
 
 # ==========================================================
-# SAFE ROUTE IMPORTS
+# ROUTER PLACEHOLDERS
 # ==========================================================
 
 auth_router = None
@@ -107,13 +109,15 @@ reviews_router = None
 chatbot_router = None
 reports_router = None
 
-# ----------------------------------------------------------
+# ==========================================================
+# AUTH ROUTE
+# ==========================================================
 
 try:
 
     from app.routes.auth import router as auth_router
 
-    print("✅ AUTH ROUTE LOADED")
+    print("✅ AUTH ROUTE IMPORTED")
 
 except Exception as e:
 
@@ -122,13 +126,15 @@ except Exception as e:
 
     traceback.print_exc()
 
-# ----------------------------------------------------------
+# ==========================================================
+# COMPANIES ROUTE
+# ==========================================================
 
 try:
 
     from app.routes.companies import router as companies_router
 
-    print("✅ COMPANIES ROUTE LOADED")
+    print("✅ COMPANIES ROUTE IMPORTED")
 
 except Exception as e:
 
@@ -137,13 +143,15 @@ except Exception as e:
 
     traceback.print_exc()
 
-# ----------------------------------------------------------
+# ==========================================================
+# DASHBOARD ROUTE
+# ==========================================================
 
 try:
 
     from app.routes.dashboard import router as dashboard_router
 
-    print("✅ DASHBOARD ROUTE LOADED")
+    print("✅ DASHBOARD ROUTE IMPORTED")
 
 except Exception as e:
 
@@ -152,13 +160,15 @@ except Exception as e:
 
     traceback.print_exc()
 
-# ----------------------------------------------------------
+# ==========================================================
+# REVIEWS ROUTE
+# ==========================================================
 
 try:
 
     from app.routes.reviews import router as reviews_router
 
-    print("✅ REVIEWS ROUTE LOADED")
+    print("✅ REVIEWS ROUTE IMPORTED")
 
 except Exception as e:
 
@@ -167,13 +177,15 @@ except Exception as e:
 
     traceback.print_exc()
 
-# ----------------------------------------------------------
+# ==========================================================
+# CHATBOT ROUTE
+# ==========================================================
 
 try:
 
     from app.routes.chatbot import router as chatbot_router
 
-    print("✅ CHATBOT ROUTE LOADED")
+    print("✅ CHATBOT ROUTE IMPORTED")
 
 except Exception as e:
 
@@ -182,13 +194,15 @@ except Exception as e:
 
     traceback.print_exc()
 
-# ----------------------------------------------------------
+# ==========================================================
+# REPORTS ROUTE
+# ==========================================================
 
 try:
 
     from app.routes.reports import router as reports_router
 
-    print("✅ REPORTS ROUTE LOADED")
+    print("✅ REPORTS ROUTE IMPORTED")
 
 except Exception as e:
 
@@ -204,54 +218,59 @@ except Exception as e:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
 
-    logger.info("🚀 Application Startup Initiated")
+    logger.info("🚀 APPLICATION STARTUP INITIATED")
 
     # ======================================================
-    # SAFE DATABASE INITIALIZATION
+    # TEMP SAFE DATABASE INIT
     # ======================================================
 
-    if init_models:
+    try:
 
-        try:
+        if init_models:
 
-            logger.info("📦 Initializing Database")
+            logger.info("📦 DATABASE INIT STARTED")
+
+            # TEMPORARILY SAFE
+            # COMMENT THIS AGAIN IF STARTUP FREEZES
 
             await init_models()
 
-            logger.success("✅ Database Initialized")
+            logger.success("✅ DATABASE INITIALIZED")
 
-        except Exception as e:
+        else:
 
-            logger.error("❌ Database Init Failed")
-            logger.error(str(e))
-            logger.error(traceback.format_exc())
+            logger.warning("⚠️ DATABASE INIT SKIPPED")
 
-    else:
+    except Exception as e:
 
-        logger.warning("⚠️ Database Init Skipped")
+        logger.error("❌ DATABASE INIT FAILED")
 
-    logger.success("✅ FastAPI Startup Complete")
+        logger.error(str(e))
+
+        logger.error(traceback.format_exc())
+
+    logger.success("✅ APPLICATION STARTUP COMPLETE")
 
     yield
 
-    logger.info("🛑 Application Shutdown Complete")
+    logger.info("🛑 APPLICATION SHUTDOWN COMPLETE")
 
 # ==========================================================
-# FASTAPI APP
+# FASTAPI APPLICATION
 # ==========================================================
 
 app = FastAPI(
 
     title="Trustlytics AI",
 
-    description="AI Reputation Intelligence SaaS",
+    description="AI Reputation Intelligence SaaS Platform",
 
     version="3.0.0",
 
     lifespan=lifespan
 )
 
-print("✅ FastAPI App Created")
+print("✅ FASTAPI APP CREATED")
 
 # ==========================================================
 # GLOBAL ERROR HANDLER
@@ -263,13 +282,9 @@ async def global_exception_handler(
     exc: Exception
 ):
 
-    logger.error(
-        f"❌ GLOBAL ERROR: {request.url}"
-    )
+    logger.error(f"❌ GLOBAL ERROR: {request.url}")
 
-    logger.error(
-        traceback.format_exc()
-    )
+    logger.error(traceback.format_exc())
 
     return JSONResponse(
 
@@ -300,7 +315,7 @@ app.add_middleware(
     allow_headers=["*"]
 )
 
-print("✅ CORS Enabled")
+print("✅ CORS ENABLED")
 
 # ==========================================================
 # SESSION MIDDLEWARE
@@ -327,7 +342,7 @@ app.add_middleware(
     https_only=False
 )
 
-print("✅ Session Middleware Enabled")
+print("✅ SESSION MIDDLEWARE ENABLED")
 
 # ==========================================================
 # TEMPLATES
@@ -344,11 +359,11 @@ if os.path.exists(TEMPLATE_DIR):
         directory=TEMPLATE_DIR
     )
 
-    print("✅ Templates Loaded")
+    print("✅ TEMPLATES LOADED")
 
 else:
 
-    print("⚠️ Templates Directory Missing")
+    print("⚠️ TEMPLATES DIRECTORY MISSING")
 
 # ==========================================================
 # STATIC FILES
@@ -372,11 +387,11 @@ if os.path.exists(STATIC_DIR):
         name="static"
     )
 
-    print("✅ Static Files Mounted")
+    print("✅ STATIC FILES MOUNTED")
 
 else:
 
-    print("⚠️ Static Directory Missing")
+    print("⚠️ STATIC DIRECTORY MISSING")
 
 # ==========================================================
 # ROOT ROUTE
@@ -418,11 +433,15 @@ if auth_router:
         auth_router
     )
 
+    print("✅ AUTH ROUTER REGISTERED")
+
 if companies_router:
 
     app.include_router(
         companies_router
     )
+
+    print("✅ COMPANIES ROUTER REGISTERED")
 
 if dashboard_router:
 
@@ -430,11 +449,15 @@ if dashboard_router:
         dashboard_router
     )
 
+    print("✅ DASHBOARD ROUTER REGISTERED")
+
 if reviews_router:
 
     app.include_router(
         reviews_router
     )
+
+    print("✅ REVIEWS ROUTER REGISTERED")
 
 if chatbot_router:
 
@@ -442,13 +465,17 @@ if chatbot_router:
         chatbot_router
     )
 
+    print("✅ CHATBOT ROUTER REGISTERED")
+
 if reports_router:
 
     app.include_router(
         reports_router
     )
 
-print("✅ Router Registration Complete")
+    print("✅ REPORTS ROUTER REGISTERED")
+
+print("✅ ALL ROUTERS PROCESSED")
 
 # ==========================================================
 # MAIN
