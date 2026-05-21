@@ -892,21 +892,28 @@ async def scrape_google_reviews(
 
             return []
 
-        # ==================================================
-        # OPEN REVIEWS PANEL
-        # ==================================================
+       # ==================================================
+# DIRECT GOOGLE REVIEWS PAGE LOADED
+# ==================================================
 
-        opened = await open_reviews_panel(
-            page
-        )
+logger.info(
+    "✅ DIRECT GOOGLE REVIEWS PAGE LOADED"
+)
 
-        if not opened:
+await asyncio.sleep(10)
 
-            logger.warning(
-                "⚠️ REVIEW PANEL FAILED"
-            )
+# ==================================================
+# FORCE REVIEW RENDERING
+# ==================================================
 
-            return []
+for _ in range(6):
+
+    await page.mouse.wheel(
+        0,
+        2500
+    )
+
+    await asyncio.sleep(4)
 
         # ==================================================
         # EXTRACT REVIEWS
