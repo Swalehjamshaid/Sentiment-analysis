@@ -1,18 +1,12 @@
 # ==========================================================
 # FILE: app/services/scraper.py
-# GOOGLE REVIEWS SCRAPER - MAY 2026 PRODUCTION VERSION
-# BASED ON:
-# - CAMOUFOX
-# - PLAYWRIGHT
-# - SESSION COOKIES
-# - DYNAMIC REVIEW FEED
-# - HUMANIZED SCROLLING
+# GOOGLE REVIEWS SCRAPER - MAY 2026 ENTERPRISE VERSION
+# PLAYWRIGHT + CAMOUFOX + COOKIES + PROXY + STEALTH
 # ==========================================================
 
 import os
 import re
 import gc
-import csv
 import json
 import time
 import random
@@ -59,7 +53,7 @@ MAX_IDLE_SCROLLS = 10
 
 SCROLL_PAUSE_MIN = 2
 
-SCROLL_PAUSE_MAX = 5
+SCROLL_PAUSE_MAX = 6
 
 DEBUG_DIR = "/tmp"
 
@@ -147,7 +141,7 @@ def generate_hash(author, text):
     ).hexdigest()
 
 # ==========================================================
-# SAVE DEBUG FILES
+# DEBUGGING
 # ==========================================================
 
 async def save_debug_files(page, name="debug"):
@@ -178,7 +172,7 @@ async def save_debug_files(page, name="debug"):
         )
 
         logger.info(
-            f"🌐 PAGE TITLE => {await page.title()}"
+            f"🌐 TITLE => {await page.title()}"
         )
 
         logger.info(
@@ -192,7 +186,7 @@ async def save_debug_files(page, name="debug"):
         )
 
 # ==========================================================
-# GOOGLE BLOCK DETECTION
+# CAPTCHA / GOOGLE BLOCK DETECTION
 # ==========================================================
 
 async def detect_google_block(page):
@@ -294,8 +288,8 @@ async def human_scroll(page):
     try:
 
         amount = random.randint(
-            1000,
-            3000
+            1200,
+            4000
         )
 
         await page.mouse.wheel(
@@ -317,7 +311,7 @@ async def human_scroll(page):
         pass
 
 # ==========================================================
-# HANDLE GOOGLE CONSENT
+# HANDLE CONSENT
 # ==========================================================
 
 async def handle_google_consent(page):
@@ -365,7 +359,7 @@ async def handle_google_consent(page):
         pass
 
 # ==========================================================
-# OPEN REVIEW PANEL
+# OPEN REVIEWS PANEL
 # ==========================================================
 
 async def open_reviews_panel(page):
@@ -486,31 +480,6 @@ async def expand_reviews(page):
         pass
 
 # ==========================================================
-# SCROLL REVIEW FEED
-# ==========================================================
-
-async def scroll_review_feed(page):
-
-    await page.evaluate("""
-
-        () => {
-
-            const feed = document.querySelector(
-                'div[role="feed"], div.RVCQse'
-            );
-
-            if (feed) {
-
-                feed.scrollBy(
-                    0,
-                    4000
-                );
-            }
-        }
-
-    """)
-
-# ==========================================================
 # EXTRACT REVIEWS
 # ==========================================================
 
@@ -522,7 +491,7 @@ async def extract_reviews(
 ):
 
     logger.info(
-        "📦 STARTING EXTRACTION"
+        "📦 STARTING ADVANCED EXTRACTION"
     )
 
     reviews = []
@@ -533,6 +502,55 @@ async def extract_reviews(
 
     previous_count = 0
 
+    # ======================================================
+    # REVIEW FEED RECOVERY
+    # ======================================================
+
+    review_feed = None
+
+    for retry in range(5):
+
+        logger.info(
+            f"🔄 REVIEW FEED DETECTION => {retry}"
+        )
+
+        review_feed = await page.query_selector(
+
+            'div[role="feed"], div.RVCQse'
+        )
+
+        if review_feed:
+
+            logger.info(
+                "✅ REVIEW FEED FOUND"
+            )
+
+            break
+
+        await human_scroll(page)
+
+        await asyncio.sleep(
+
+            random.uniform(3, 7)
+        )
+
+    if not review_feed:
+
+        logger.warning(
+            "⚠️ REVIEW FEED NOT FOUND"
+        )
+
+        await save_debug_files(
+            page,
+            "review_feed_missing"
+        )
+
+        return []
+
+    # ======================================================
+    # EXTRACTION LOOP
+    # ======================================================
+
     for scroll in range(MAX_SCROLLS):
 
         logger.info(
@@ -541,22 +559,159 @@ async def extract_reviews(
 
         try:
 
-            cards = await page.query_selector_all(
+            # ==================================================
+            # CAPTCHA DETECTION
+            # ==================================================
 
-                'div[data-review-id], '
+            blocked = await detect_google_block(
+                page
+            )
 
-                'div.jftiEf, '
+            if blocked:
 
-                'div.MyEned, '
+                logger.warning(
+                    "⚠️ CAPTCHA DURING EXTRACTION"
+                )
 
-                'div[jsname="ShBeI"], '
+                await save_debug_files(
+                    page,
+                    "captcha_mid_scrape"
+                )
+
+                break
+
+            # ==================================================
+            # REVIEW MODAL VALIDATION
+            # ==================================================
+
+            review_modal = await page.query_selector(
+                'div[role="dialog"]'
+            )
+
+            if not review_modal:
+
+                logger.warning(
+                    "⚠️ REVIEW MODAL CLOSED"
+                )
+
+                reopened = await open_reviews_panel(
+                    page
+                )
+
+                if reopened:
+
+                    logger.info(
+                        "✅ REVIEW MODAL REOPENED"
+                    )
+
+                    await asyncio.sleep(10)
+
+            # ==================================================
+            # WAIT FOR REVIEW CARDS
+            # ==================================================
+
+            try:
+
+                await page.wait_for_selector(
+
+                    'div[data-review-id], '
+
+                    'div[jsname="ShBeI"], '
+
+                    'div.jftiEf, '
+
+                    'div.MyEned',
+
+                    timeout=30000
+                )
+
+            except Exception:
+
+                logger.warning(
+                    "⚠️ REVIEW CARD WAIT TIMEOUT"
+                )
+
+            # ==================================================
+            # MULTI SELECTOR EXTRACTION
+            # ==================================================
+
+            review_selectors = [
+
+                'div[data-review-id]',
+
+                'div[jsname="ShBeI"]',
+
+                'div.jftiEf',
+
+                'div.MyEned',
 
                 'div[role="article"]'
-            )
+            ]
+
+            cards = []
+
+            for selector in review_selectors:
+
+                try:
+
+                    selector_cards = await page.query_selector_all(
+                        selector
+                    )
+
+                    logger.info(
+                        f"📦 SELECTOR => {selector} => {len(selector_cards)}"
+                    )
+
+                    if len(selector_cards) > 0:
+
+                        cards.extend(
+                            selector_cards
+                        )
+
+                except Exception:
+                    continue
+
+            # ==================================================
+            # REMOVE DUPLICATES
+            # ==================================================
+
+            unique_cards = []
+
+            seen_elements = set()
+
+            for card in cards:
+
+                try:
+
+                    html = await card.inner_html()
+
+                    element_hash = hashlib.md5(
+                        html.encode("utf-8")
+                    ).hexdigest()
+
+                    if element_hash in seen_elements:
+                        continue
+
+                    seen_elements.add(
+                        element_hash
+                    )
+
+                    unique_cards.append(
+                        card
+                    )
+
+                except Exception:
+                    continue
+
+            cards = unique_cards
 
             logger.info(
-                f"📦 REVIEW CARDS => {len(cards)}"
+                f"📦 UNIQUE CARDS => {len(cards)}"
             )
+
+            # ==================================================
+            # PARSE REVIEWS
+            # ==================================================
 
             for card in cards:
 
@@ -570,9 +725,9 @@ async def extract_reviews(
 
                     review_date = ""
 
-                    # ======================================
+                    # ==========================================
                     # AUTHOR
-                    # ======================================
+                    # ==========================================
 
                     author_selectors = [
 
@@ -580,7 +735,9 @@ async def extract_reviews(
 
                         '.TSUbDb',
 
-                        '.Vpc5Fe'
+                        '.Vpc5Fe',
+
+                        'span[class*="d4r55"]'
                     ]
 
                     for selector in author_selectors:
@@ -602,11 +759,11 @@ async def extract_reviews(
                                     break
 
                         except Exception:
-                            pass
+                            continue
 
-                    # ======================================
+                    # ==========================================
                     # REVIEW TEXT
-                    # ======================================
+                    # ==========================================
 
                     text_selectors = [
 
@@ -616,7 +773,9 @@ async def extract_reviews(
 
                         '.OA1nbd',
 
-                        'span[jscontroller]'
+                        'span[jscontroller]',
+
+                        'div[class*="review"] span'
                     ]
 
                     for selector in text_selectors:
@@ -638,14 +797,14 @@ async def extract_reviews(
                                     break
 
                         except Exception:
-                            pass
+                            continue
 
                     if not review_text:
                         continue
 
-                    # ======================================
+                    # ==========================================
                     # RATING
-                    # ======================================
+                    # ==========================================
 
                     rating_selectors = [
 
@@ -677,11 +836,11 @@ async def extract_reviews(
                                 break
 
                         except Exception:
-                            pass
+                            continue
 
-                    # ======================================
+                    # ==========================================
                     # DATE
-                    # ======================================
+                    # ==========================================
 
                     date_selectors = [
 
@@ -709,7 +868,11 @@ async def extract_reviews(
                                     break
 
                         except Exception:
-                            pass
+                            continue
+
+                    # ==========================================
+                    # DEDUPLICATION
+                    # ==========================================
 
                     review_id = generate_hash(
                         author,
@@ -741,12 +904,21 @@ async def extract_reviews(
                             review_text
                     })
 
-                except Exception:
+                except Exception as e:
+
+                    logger.warning(
+                        f"⚠️ REVIEW PARSE FAILED => {e}"
+                    )
+
                     continue
 
             logger.info(
                 f"✅ TOTAL REVIEWS => {len(reviews)}"
             )
+
+            # ==================================================
+            # TARGET LIMIT
+            # ==================================================
 
             if len(reviews) >= target_limit:
 
@@ -756,14 +928,65 @@ async def extract_reviews(
 
                 break
 
+            # ==================================================
+            # EXPAND REVIEWS
+            # ==================================================
+
             await expand_reviews(page)
 
-            await scroll_review_feed(page)
+            # ==================================================
+            # PRIMARY FEED SCROLL
+            # ==================================================
+
+            try:
+
+                await page.evaluate("""
+
+                    () => {
+
+                        const feed = document.querySelector(
+                            'div[role="feed"], div.RVCQse'
+                        );
+
+                        if (feed) {
+
+                            feed.scrollBy(
+                                0,
+                                4000
+                            );
+                        }
+                    }
+
+                """)
+
+            except Exception:
+
+                logger.warning(
+                    "⚠️ FEED SCROLL FAILED"
+                )
+
+            # ==================================================
+            # FALLBACK PAGE SCROLL
+            # ==================================================
+
+            try:
+
+                await page.mouse.wheel(
+                    0,
+                    4000
+                )
+
+            except Exception:
+                pass
 
             await asyncio.sleep(
 
-                random.uniform(4, 7)
+                random.uniform(4, 8)
             )
+
+            # ==================================================
+            # IDLE DETECTION
+            # ==================================================
 
             current_count = len(reviews)
 
@@ -771,16 +994,40 @@ async def extract_reviews(
 
                 idle_scrolls += 1
 
+                logger.warning(
+                    f"⚠️ IDLE SCROLL => {idle_scrolls}"
+                )
+
             else:
 
                 idle_scrolls = 0
 
             previous_count = current_count
 
+            # ==================================================
+            # RECOVERY REOPEN
+            # ==================================================
+
+            if idle_scrolls >= 3:
+
+                logger.warning(
+                    "⚠️ REOPENING REVIEW PANEL"
+                )
+
+                await open_reviews_panel(
+                    page
+                )
+
+                await asyncio.sleep(10)
+
+            # ==================================================
+            # FINAL STOP
+            # ==================================================
+
             if idle_scrolls >= MAX_IDLE_SCROLLS:
 
                 logger.warning(
-                    "⚠️ IDLE SCROLL LIMIT REACHED"
+                    "⚠️ MAX IDLE SCROLL REACHED"
                 )
 
                 break
@@ -788,8 +1035,17 @@ async def extract_reviews(
         except Exception as e:
 
             logger.exception(
-                f"❌ EXTRACTION ERROR => {e}"
+                f"❌ EXTRACTION LOOP ERROR => {e}"
             )
+
+            await save_debug_files(
+                page,
+                f"extraction_error_{scroll}"
+            )
+
+    logger.info(
+        f"✅ FINAL REVIEW COUNT => {len(reviews)}"
+    )
 
     gc.collect()
 
@@ -942,7 +1198,7 @@ async def scrape_google_reviews(
         )
 
         logger.info(
-            f"🌐 OPENING MAPS => {maps_url}"
+            f"🌐 OPENING URL => {maps_url}"
         )
 
         await page.goto(
@@ -964,7 +1220,7 @@ async def scrape_google_reviews(
         )
 
         # ==================================================
-        # DETECT BLOCK
+        # GOOGLE BLOCK CHECK
         # ==================================================
 
         blocked = await detect_google_block(
@@ -985,7 +1241,7 @@ async def scrape_google_reviews(
             return []
 
         # ==================================================
-        # OPEN REVIEWS
+        # OPEN REVIEW PANEL
         # ==================================================
 
         opened = await open_reviews_panel(
@@ -1014,10 +1270,6 @@ async def scrape_google_reviews(
             page,
 
             target_limit=target_limit
-        )
-
-        logger.info(
-            f"📦 PAGE LENGTH => {len(await page.content())}"
         )
 
         if len(reviews) == 0:
