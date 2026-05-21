@@ -19,7 +19,7 @@ from app.core.base import Base
 
 # VERY IMPORTANT
 # FORCE LOAD ALL MODELS
-from app.core.models import *
+import app.core.models
 
 # ==========================================================
 # LOGGING
@@ -221,6 +221,9 @@ async def init_models():
 # ==========================================================
 
 async def get_db():
+    async def get_session():
+    async for session in get_db():
+        yield session
 
     async with AsyncSessionLocal() as session:
 
