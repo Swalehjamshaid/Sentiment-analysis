@@ -1,6 +1,17 @@
 # ==========================================================
 # REVIEW INTEL AI — RAILWAY PRODUCTION DOCKERFILE
-# FASTAPI + CAMOUFOX + PLAYWRIGHT + FIREFOX
+# MAY 2026 ENTERPRISE VERSION
+#
+# SUPPORTS:
+# ✅ FASTAPI
+# ✅ PLAYWRIGHT
+# ✅ CAMOUFOX
+# ✅ SELENIUMBASE
+# ✅ UNDETECTED CHROMEDRIVER
+# ✅ GOOGLE MAPS SCRAPING
+# ✅ FIREFOX + CHROMIUM
+# ✅ STEALTH BROWSERS
+# ✅ RAILWAY DEPLOYMENT
 # ==========================================================
 
 FROM python:3.11-slim
@@ -26,14 +37,18 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y \
     build-essential \
     gcc \
+    g++ \
     wget \
     curl \
     unzip \
+    git \
     xvfb \
     ca-certificates \
     fonts-liberation \
     xdg-utils \
     firefox-esr \
+    chromium \
+    chromium-driver \
     libglib2.0-0 \
     libnss3 \
     libnspr4 \
@@ -62,6 +77,12 @@ RUN apt-get update && apt-get install -y \
     libu2f-udev \
     libvulkan1 \
     libglu1-mesa \
+    libxml2-dev \
+    libxslt1-dev \
+    zlib1g-dev \
+    libjpeg-dev \
+    libffi-dev \
+    libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # ==========================================================
@@ -71,7 +92,7 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt .
 
 # ==========================================================
-# UPGRADE PIP
+# UPGRADE PIP TO LATEST
 # ==========================================================
 
 RUN pip install --upgrade pip setuptools wheel
@@ -83,16 +104,10 @@ RUN pip install --upgrade pip setuptools wheel
 RUN pip install --no-cache-dir -r requirements.txt
 
 # ==========================================================
-# INSTALL PLAYWRIGHT FIREFOX
+# INSTALL PLAYWRIGHT BROWSERS + DEPS
 # ==========================================================
 
-RUN playwright install firefox
-
-# ==========================================================
-# INSTALL PLAYWRIGHT SYSTEM DEPS
-# ==========================================================
-
-RUN python -m playwright install-deps
+RUN playwright install --with-deps chromium firefox
 
 # ==========================================================
 # INSTALL CAMOUFOX BROWSER
@@ -101,16 +116,34 @@ RUN python -m playwright install-deps
 RUN python -m camoufox fetch
 
 # ==========================================================
+# CREATE PLAYWRIGHT CACHE DIR
+# ==========================================================
+
+RUN mkdir -p /ms-playwright
+
+# ==========================================================
 # COPY PROJECT FILES
 # ==========================================================
 
 COPY . .
 
 # ==========================================================
+# CREATE TMP DEBUG DIRECTORY
+# ==========================================================
+
+RUN mkdir -p /tmp
+
+# ==========================================================
 # EXPOSE PORT
 # ==========================================================
 
 EXPOSE 8080
+
+# ==========================================================
+# HEALTHCHECK
+# ==========================================================
+
+HEALTHCHECK CMD curl --fail http://localhost:8080 || exit 1
 
 # ==========================================================
 # START FASTAPI
