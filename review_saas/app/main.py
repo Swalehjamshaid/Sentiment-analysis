@@ -10,10 +10,7 @@ import logging
 from datetime import datetime
 from contextlib import asynccontextmanager
 
-from fastapi import (
-    FastAPI,
-    Request,
-)
+from fastapi import FastAPI, Request
 
 from fastapi.responses import (
     HTMLResponse,
@@ -23,37 +20,78 @@ from fastapi.responses import (
 
 from fastapi.middleware.cors import CORSMiddleware
 
-from starlette.middleware.sessions import (
-    SessionMiddleware
-)
+from starlette.middleware.sessions import SessionMiddleware
 
-from starlette.templating import (
-    Jinja2Templates
-)
+from starlette.templating import Jinja2Templates
 
-from starlette.staticfiles import (
-    StaticFiles
-)
+from starlette.staticfiles import StaticFiles
 
 from loguru import logger
 
 # ==========================================================
-# CORE IMPORTS
+# DEBUG STARTUP
 # ==========================================================
 
-from app.core.config import settings
-from app.core.db import init_models
+print("🚀 MAIN.PY STARTING")
+print("🐍 PYTHON VERSION:", sys.version)
 
 # ==========================================================
-# ROUTES IMPORTS
+# IMPORT CONFIG
 # ==========================================================
 
-from app.routes import auth
-from app.routes import companies
-from app.routes import dashboard
-from app.routes import reviews
-from app.routes import chatbot
-from app.routes import reports
+try:
+
+    from app.core.config import settings
+
+    print("✅ CONFIG IMPORTED")
+
+except Exception as e:
+
+    print("❌ CONFIG IMPORT FAILED")
+    print(e)
+
+    raise
+
+# ==========================================================
+# SAFE DB IMPORT
+# ==========================================================
+
+try:
+
+    from app.core.db import init_models
+
+    print("✅ DB IMPORTED")
+
+except Exception as e:
+
+    print("❌ DB IMPORT FAILED")
+    print(e)
+
+    init_models = None
+
+# ==========================================================
+# ROUTE IMPORTS
+# ==========================================================
+
+try:
+
+    from app.routes import auth
+    from app.routes import companies
+    from app.routes import dashboard
+    from app.routes import reviews
+    from app.routes import chatbot
+    from app.routes import reports
+
+    print("✅ ROUTES IMPORTED")
+
+except Exception as e:
+
+    print("❌ ROUTES IMPORT FAILED")
+    print(e)
+
+    traceback.print_exc()
+
+    raise
 
 # ==========================================================
 # LOGGING
@@ -63,21 +101,19 @@ logger.remove()
 
 logger.add(
     sys.stdout,
-    level="DEBUG",
-    backtrace=True,
-    diagnose=True,
+    level="INFO",
     enqueue=True
 )
 
 logging.basicConfig(level=logging.INFO)
 
 # ==========================================================
-# BASE DIRECTORY
+# BASE DIR
 # ==========================================================
 
-BASE_DIR = os.path.dirname(
-    os.path.abspath(__file__)
-)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+print("✅ BASE_DIR:", BASE_DIR)
 
 # ==========================================================
 # LIFESPAN
@@ -86,35 +122,32 @@ BASE_DIR = os.path.dirname(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
 
-    logger.info(
-        "🚀 Starting Review Intel AI"
-    )
+    logger.info("🚀 STARTUP INITIATED")
+
+    # IMPORTANT:
+    # TEMP DISABLE HEAVY INIT
 
     try:
 
-        await init_models()
+        if init_models:
 
-        logger.success(
-            "✅ Database initialized successfully"
-        )
+            logger.info("📦 INITIALIZING DATABASE")
+
+            await init_models()
+
+            logger.success("✅ DATABASE INITIALIZED")
 
     except Exception as e:
 
-        logger.error(
-            "❌ Database initialization failed"
-        )
+        logger.error("❌ DATABASE INIT FAILED")
+        logger.error(str(e))
+        logger.error(traceback.format_exc())
 
-        logger.error(
-            traceback.format_exc()
-        )
-
-        raise e
+    logger.success("✅ STARTUP COMPLETE")
 
     yield
 
-    logger.info(
-        "🛑 Application shutdown complete"
-    )
+    logger.info("🛑 SHUTDOWN COMPLETE")
 
 # ==========================================================
 # FASTAPI APP
@@ -124,37 +157,23 @@ app = FastAPI(
 
     title="Review Intel AI",
 
-    description="""
-    AI Reputation Monitoring &
-    Business Intelligence Platform
-    """,
-
     version="3.0.0",
 
     lifespan=lifespan
 )
 
+print("✅ FASTAPI CREATED")
+
 # ==========================================================
-# GLOBAL ERROR HANDLER
+# ERROR HANDLER
 # ==========================================================
 
 @app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
 
-async def global_exception_handler(
+    logger.error(f"❌ ERROR: {request.url}")
 
-    request: Request,
-
-    exc: Exception
-
-):
-
-    logger.error(
-        f"❌ GLOBAL ERROR: {request.url}"
-    )
-
-    logger.error(
-        traceback.format_exc()
-    )
+    logger.error(traceback.format_exc())
 
     return JSONResponse(
 
@@ -162,14 +181,9 @@ async def global_exception_handler(
 
         content={
 
-            "status":
-                "error",
+            "status": "error",
 
-            "message":
-                "Internal Server Error",
-
-            "detail":
-                str(exc)
+            "message": str(exc)
         }
     )
 
@@ -190,27 +204,29 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+print("✅ CORS ENABLED")
+
 # ==========================================================
-# SESSION MIDDLEWARE
+# SESSION
 # ==========================================================
+
+SECRET_KEY = getattr(
+    settings,
+    "SECRET_KEY",
+    "railway-secret"
+)
 
 app.add_middleware(
 
     SessionMiddleware,
 
-    secret_key=settings.SECRET_KEY,
-
-    session_cookie="review_intel_session",
-
-    max_age=86400,
-
-    same_site="lax",
-
-    https_only=False
+    secret_key=SECRET_KEY
 )
 
+print("✅ SESSION ENABLED")
+
 # ==========================================================
-# TEMPLATE DIRECTORY
+# TEMPLATES
 # ==========================================================
 
 TEMPLATE_DIR = os.path.join(
@@ -218,52 +234,14 @@ TEMPLATE_DIR = os.path.join(
     "templates"
 )
 
-if not os.path.exists(TEMPLATE_DIR):
-
-    raise RuntimeError(
-        f"❌ Templates folder not found: {TEMPLATE_DIR}"
-    )
-
 templates = Jinja2Templates(
     directory=TEMPLATE_DIR
 )
 
-templates.env.cache = None
-
-logger.success(
-    f"✅ Templates Loaded: {TEMPLATE_DIR}"
-)
+print("✅ TEMPLATES READY")
 
 # ==========================================================
-# DATE FILTER
-# ==========================================================
-
-def format_date(
-    value,
-    format="%Y-%m-%d"
-):
-
-    if not value:
-        return ""
-
-    try:
-
-        if isinstance(value, str):
-
-            value = datetime.fromisoformat(
-                value
-            )
-
-        return value.strftime(format)
-
-    except Exception:
-
-        return str(value)
-
-templates.env.filters["date"] = format_date
-
-# ==========================================================
-# STATIC FILES
+# STATIC
 # ==========================================================
 
 STATIC_DIR = os.path.join(
@@ -274,246 +252,82 @@ STATIC_DIR = os.path.join(
 if os.path.exists(STATIC_DIR):
 
     app.mount(
-
         "/static",
-
         StaticFiles(directory=STATIC_DIR),
-
         name="static"
     )
 
-    logger.success(
-        f"✅ Static Mounted: {STATIC_DIR}"
-    )
-
-else:
-
-    logger.warning(
-        "⚠️ Static folder not found"
-    )
+    print("✅ STATIC MOUNTED")
 
 # ==========================================================
 # ROOT
 # ==========================================================
 
-@app.get(
-    "/",
-    response_class=HTMLResponse
-)
-
-async def root(
-    request: Request
-):
-
-    if not request.session.get("user_id"):
-
-        return RedirectResponse(
-            "/login",
-            status_code=303
-        )
-
-    return RedirectResponse(
-        "/dashboard",
-        status_code=303
-    )
-
-# ==========================================================
-# LOGIN PAGE
-# ==========================================================
-
-@app.get(
-    "/login",
-    response_class=HTMLResponse
-)
-
-async def login_page(
-    request: Request
-):
-
-    return templates.TemplateResponse(
-
-        {
-            "request": request
-        },
-
-        "login.html"
-    )
-
-# ==========================================================
-# REGISTER PAGE
-# ==========================================================
-
-@app.get(
-    "/register",
-    response_class=HTMLResponse
-)
-
-async def register_page(
-    request: Request
-):
-
-    return templates.TemplateResponse(
-
-        {
-            "request": request
-        },
-
-        "register.html"
-    )
-
-# ==========================================================
-# DASHBOARD PAGE
-# ==========================================================
-
-@app.get(
-    "/dashboard",
-    response_class=HTMLResponse
-)
-
-async def dashboard_page(
-    request: Request
-):
-
-    if not request.session.get("user_id"):
-
-        return RedirectResponse(
-            "/login",
-            status_code=303
-        )
-
-    return templates.TemplateResponse(
-
-        {
-
-            "request": request,
-
-            "user": {
-
-                "id":
-                    request.session.get(
-                        "user_id"
-                    ),
-
-                "name":
-                    request.session.get(
-                        "user_name"
-                    ),
-
-                "email":
-                    request.session.get(
-                        "user_email"
-                    )
-            }
-        },
-
-        "dashboard.html"
-    )
-
-# ==========================================================
-# LOGOUT
-# ==========================================================
-
-@app.get("/logout")
-@app.get("/api/auth/logout")
-
-async def logout(
-    request: Request
-):
-
-    request.session.clear()
-
-    logger.info(
-        "✅ User logged out"
-    )
-
-    return RedirectResponse(
-        "/login",
-        status_code=303
-    )
-
-# ==========================================================
-# HEALTH CHECK
-# ==========================================================
-
-@app.get("/health")
-
-async def health_check():
+@app.get("/")
+async def root():
 
     return {
-
-        "status":
-            "healthy",
-
-        "service":
-            "Review Intel AI",
-
-        "timestamp":
-            datetime.utcnow().isoformat()
+        "status": "running"
     }
 
 # ==========================================================
-# INCLUDE ROUTERS
+# HEALTH
 # ==========================================================
 
-app.include_router(
+@app.get("/health")
+async def health():
 
-    auth.router,
+    return {
 
-    prefix="/api/auth",
+        "status": "healthy",
 
-    tags=["Authentication"]
-)
-
-app.include_router(
-
-    companies.router,
-
-    prefix="/api",
-
-    tags=["Companies"]
-)
-
-app.include_router(
-
-    dashboard.router,
-
-    prefix="/api",
-
-    tags=["Dashboard"]
-)
-
-app.include_router(
-
-    reviews.router,
-
-    prefix="/api",
-
-    tags=["Reviews"]
-)
-
-app.include_router(
-
-    chatbot.router,
-
-    prefix="/api",
-
-    tags=["Chatbot"]
-)
+        "timestamp": datetime.utcnow().isoformat()
+    }
 
 # ==========================================================
-# REPORTS ROUTER
+# ROUTERS
 # ==========================================================
 
-app.include_router(
-    reports.router
-)
+try:
 
-logger.success(
-    "✅ Reports router enabled"
-)
+    app.include_router(
+        auth.router,
+        prefix="/api/auth"
+    )
+
+    app.include_router(
+        companies.router,
+        prefix="/api"
+    )
+
+    app.include_router(
+        dashboard.router,
+        prefix="/api"
+    )
+
+    app.include_router(
+        reviews.router,
+        prefix="/api"
+    )
+
+    app.include_router(
+        chatbot.router,
+        prefix="/api"
+    )
+
+    app.include_router(
+        reports.router
+    )
+
+    print("✅ ROUTERS REGISTERED")
+
+except Exception as e:
+
+    print("❌ ROUTER ERROR")
+    print(e)
 
 # ==========================================================
-# STARTUP
+# MAIN
 # ==========================================================
 
 if __name__ == "__main__":
@@ -533,7 +347,5 @@ if __name__ == "__main__":
             )
         ),
 
-        reload=True,
-
-        workers=1
+        reload=False
     )
