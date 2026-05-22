@@ -1,15 +1,20 @@
 # ==========================================================
 # FILE: app/main.py
-# TRUSTLYTICS AI — FINAL ENTERPRISE MAIN.PY
+# TRUSTLYTICS AI — WORLD-CLASS ENTERPRISE MAIN.PY
 # MAY 2026 PRODUCTION VERSION
 # ==========================================================
+
+from __future__ import annotations
 
 import os
 import sys
 import traceback
 import logging
 
+from pathlib import Path
+
 from datetime import datetime
+
 from contextlib import asynccontextmanager
 
 from fastapi import (
@@ -52,7 +57,7 @@ print(
 )
 
 # ==========================================================
-# LOGGER
+# LOGGER CONFIG
 # ==========================================================
 
 logger.remove()
@@ -88,6 +93,32 @@ BASE_DIR = os.path.dirname(
 
 print(
     f"✅ BASE_DIR: {BASE_DIR}"
+)
+
+# ==========================================================
+# REQUIRED DIRECTORIES
+# ==========================================================
+
+REQUIRED_DIRS = [
+
+    os.path.join(BASE_DIR, "templates"),
+
+    os.path.join(BASE_DIR, "static"),
+
+    os.path.join(BASE_DIR, "static", "css"),
+
+    os.path.join(BASE_DIR, "static", "reports"),
+]
+
+for directory in REQUIRED_DIRS:
+
+    os.makedirs(
+        directory,
+        exist_ok=True
+    )
+
+logger.info(
+    "✅ REQUIRED DIRECTORIES VERIFIED"
 )
 
 # ==========================================================
@@ -152,6 +183,42 @@ except Exception as e:
     traceback.print_exc()
 
 # ==========================================================
+# TEMPLATE VALIDATION
+# ==========================================================
+
+def validate_required_files():
+
+    required_files = [
+
+        os.path.join(
+            BASE_DIR,
+            "templates",
+            "executive_report.html"
+        ),
+
+        os.path.join(
+            BASE_DIR,
+            "static",
+            "css",
+            "executive_theme.css"
+        ),
+    ]
+
+    for file_path in required_files:
+
+        if os.path.exists(file_path):
+
+            logger.success(
+                f"✅ FILE VERIFIED => {file_path}"
+            )
+
+        else:
+
+            logger.warning(
+                f"⚠️ FILE MISSING => {file_path}"
+            )
+
+# ==========================================================
 # LIFESPAN
 # ==========================================================
 
@@ -161,6 +228,78 @@ async def lifespan(app: FastAPI):
     logger.info(
         "🚀 APPLICATION STARTUP"
     )
+
+    # ======================================================
+    # WEASYPRINT CHECK
+    # ======================================================
+
+    try:
+
+        import weasyprint
+
+        logger.success(
+            "✅ WEASYPRINT READY"
+        )
+
+    except Exception as e:
+
+        logger.error(
+            f"❌ WEASYPRINT FAILED: {e}"
+        )
+
+    # ======================================================
+    # PLOTLY CHECK
+    # ======================================================
+
+    try:
+
+        import plotly
+
+        logger.success(
+            "✅ PLOTLY READY"
+        )
+
+    except Exception as e:
+
+        logger.error(
+            f"❌ PLOTLY FAILED: {e}"
+        )
+
+    # ======================================================
+    # WORDCLOUD CHECK
+    # ======================================================
+
+    try:
+
+        import wordcloud
+
+        logger.success(
+            "✅ WORDCLOUD READY"
+        )
+
+    except Exception as e:
+
+        logger.error(
+            f"❌ WORDCLOUD FAILED: {e}"
+        )
+
+    # ======================================================
+    # SPACY CHECK
+    # ======================================================
+
+    try:
+
+        import spacy
+
+        logger.success(
+            "✅ SPACY READY"
+        )
+
+    except Exception as e:
+
+        logger.error(
+            f"❌ SPACY FAILED: {e}"
+        )
 
     # ======================================================
     # DATABASE HEALTH
@@ -191,7 +330,7 @@ async def lifespan(app: FastAPI):
         )
 
     # ======================================================
-    # INIT DATABASE
+    # DATABASE INIT
     # ======================================================
 
     try:
@@ -223,6 +362,16 @@ async def lifespan(app: FastAPI):
         logger.error(
             traceback.format_exc()
         )
+
+    # ======================================================
+    # TEMPLATE VALIDATION
+    # ======================================================
+
+    validate_required_files()
+
+    logger.success(
+        "🧠 EXECUTIVE REPORT ENGINE READY"
+    )
 
     logger.success(
         "✅ APPLICATION STARTUP COMPLETE"
@@ -264,7 +413,7 @@ app = FastAPI(
 
     description="Enterprise AI Review Intelligence SaaS",
 
-    version="3.0.0",
+    version="4.0.0",
 
     lifespan=lifespan
 )
@@ -287,7 +436,7 @@ async def global_exception_handler(
 ):
 
     logger.error(
-        f"❌ GLOBAL ERROR: {request.url}"
+        f"❌ GLOBAL ERROR => {request.url}"
     )
 
     logger.error(
@@ -314,7 +463,16 @@ app.add_middleware(
 
     CORSMiddleware,
 
-    allow_origins=["*"],
+    allow_origins=[
+
+        "https://trustlytics.online",
+
+        "https://sentiment-analysis-production-f96a.up.railway.app",
+
+        "http://localhost:3000",
+
+        "http://127.0.0.1:3000",
+    ],
 
     allow_credentials=True,
 
@@ -352,7 +510,7 @@ app.add_middleware(
 
     same_site="lax",
 
-    https_only=False
+    https_only=True
 )
 
 print(
@@ -364,13 +522,11 @@ print(
 # ==========================================================
 
 TEMPLATE_DIR = os.path.join(
-
     BASE_DIR,
-
     "templates"
 )
 
-templates = None
+templates: Jinja2Templates | None = None
 
 if os.path.exists(TEMPLATE_DIR):
 
@@ -393,9 +549,7 @@ else:
 # ==========================================================
 
 STATIC_DIR = os.path.join(
-
     BASE_DIR,
-
     "static"
 )
 
@@ -432,7 +586,7 @@ async def root():
 
     return RedirectResponse(
 
-        url="/login",
+        url="/dashboard",
 
         status_code=302
     )
@@ -454,7 +608,6 @@ async def login_page(
             "login.html",
 
             {
-
                 "request": request
             }
         )
@@ -466,7 +619,6 @@ async def login_page(
         )
 
         return HTMLResponse(
-
             "<h1>Login Template Missing</h1>"
         )
 
@@ -487,7 +639,6 @@ async def register_page(
             "register.html",
 
             {
-
                 "request": request
             }
         )
@@ -499,7 +650,6 @@ async def register_page(
         )
 
         return HTMLResponse(
-
             "<h1>Register Template Missing</h1>"
         )
 
@@ -550,7 +700,6 @@ async def dashboard_page(
         )
 
         return HTMLResponse(
-
             "<h1>Dashboard Template Missing</h1>"
         )
 
@@ -571,7 +720,6 @@ async def companies_page(
             "companies.html",
 
             {
-
                 "request": request
             }
         )
@@ -583,7 +731,6 @@ async def companies_page(
         )
 
         return HTMLResponse(
-
             "<h1>Companies Template Missing</h1>"
         )
 
@@ -623,7 +770,7 @@ ROUTES = [
 
     "chatbot",
 
-    "reports"
+    "reports",
 ]
 
 # ==========================================================
@@ -638,6 +785,10 @@ for route_name in ROUTES:
             f"📦 Loading Route: {route_name}"
         )
 
+        logger.info(
+            f"🚀 IMPORTING => {route_name}"
+        )
+
         module = __import__(
 
             f"app.routes.{route_name}",
@@ -650,27 +801,15 @@ for route_name in ROUTES:
             "router"
         )
 
-        # ==================================================
-        # SMART PREFIX DETECTION
-        # ==================================================
-
         existing_prefix = getattr(
             router,
             "prefix",
             ""
         )
 
-        # ==================================================
-        # ROUTER ALREADY HAS /api
-        # ==================================================
-
         if existing_prefix.startswith("/api"):
 
             app.include_router(router)
-
-        # ==================================================
-        # ROUTER DOES NOT HAVE /api
-        # ==================================================
 
         else:
 
@@ -681,19 +820,15 @@ for route_name in ROUTES:
                 prefix="/api"
             )
 
-        print(
+        logger.success(
             f"✅ {route_name.upper()} ROUTER REGISTERED"
         )
 
-    except Exception as e:
+    except Exception:
 
-        print(
-            f"❌ {route_name.upper()} ROUTER FAILED"
+        logger.exception(
+            f"❌ ROUTER IMPORT FAILED => {route_name}"
         )
-
-        print(str(e))
-
-        traceback.print_exc()
 
 # ==========================================================
 # STARTUP COMPLETE
