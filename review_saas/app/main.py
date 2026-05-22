@@ -1,7 +1,7 @@
 # ==========================================================
 # FILE: app/main.py
-# TRUSTLYTICS AI — FINAL 100% INTEGRATED MAIN.PY
-# MAY 2026 ENTERPRISE PRODUCTION VERSION
+# TRUSTLYTICS AI — FINAL ENTERPRISE MAIN.PY
+# MAY 2026 PRODUCTION VERSION
 # ==========================================================
 
 import os
@@ -515,10 +515,6 @@ async def dashboard_page(
 
     try:
 
-        # ==================================================
-        # SESSION CHECK
-        # ==================================================
-
         user_id = request.session.get(
             "user_id"
         )
@@ -655,22 +651,17 @@ for route_name in ROUTES:
         )
 
         # ==================================================
-        # API PREFIX INTEGRATION
+        # INCLUDE ROUTER DIRECTLY
+        # ==================================================
+        # IMPORTANT:
+        # All routers already contain their own prefixes
+        # Example:
+        # /api/chatbot
+        # /api/reports
+        # /api/reviews
         # ==================================================
 
-        if route_name == "auth":
-
-            # auth already has /api/auth
-            app.include_router(router)
-
-        else:
-
-            app.include_router(
-
-                router,
-
-                prefix="/api"
-            )
+        app.include_router(router)
 
         print(
             f"✅ {route_name.upper()} ROUTER REGISTERED"
