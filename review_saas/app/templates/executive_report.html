@@ -1,4 +1,11 @@
+<!-- ======================================================
+FILE: review_saas/app/templates/executive_report.html
+TRUSTLYTICS AI — ENTERPRISE EXECUTIVE REPORT
+WEASYPRINT SAFE VERSION
+====================================================== -->
+
 <!DOCTYPE html>
+
 <html lang="en">
 
 <head>
@@ -30,26 +37,28 @@
     <div class="header">
 
         <h1>
-            {{ company.name }}
+
+            {{ company.name if company else 'Company Report' }}
+
         </h1>
 
         <p class="subtitle">
+
             Enterprise AI Executive Intelligence Report
+
         </p>
 
         <div class="meta">
 
-            <span>
-                Generated:
-                {{ generated_at }}
-            </span>
+            Generated:
+            {{ generated_at if generated_at else 'N/A' }}
 
         </div>
 
     </div>
 
     <!-- ================================================== -->
-    <!-- KPI SECTION -->
+    <!-- KPI GRID -->
     <!-- ================================================== -->
 
     <div class="kpi-grid">
@@ -62,7 +71,7 @@
 
             <div class="metric">
 
-                {{ analytics.total_reviews }}
+                {{ analytics.total_reviews if analytics else 0 }}
 
             </div>
 
@@ -76,7 +85,7 @@
 
             <div class="metric">
 
-                {{ analytics.average_rating }}
+                {{ analytics.average_rating if analytics else 0 }}
 
             </div>
 
@@ -90,7 +99,7 @@
 
             <div class="metric">
 
-                {{ analytics.reputation_score }}
+                {{ analytics.reputation_score if analytics else 0 }}
 
             </div>
 
@@ -104,7 +113,7 @@
 
             <div class="metric">
 
-                {{ analytics.engagement_level }}
+                {{ analytics.engagement_level if analytics else 'N/A' }}
 
             </div>
 
@@ -113,7 +122,7 @@
     </div>
 
     <!-- ================================================== -->
-    <!-- VALIDATION SECTION -->
+    <!-- VALIDATION -->
     <!-- ================================================== -->
 
     <div class="section">
@@ -143,7 +152,9 @@
                 </td>
 
                 <td>
-                    {{ validation.rating_status }}
+
+                    {{ validation.rating_status if validation else 'N/A' }}
+
                 </td>
 
             </tr>
@@ -155,7 +166,9 @@
                 </td>
 
                 <td>
-                    {{ validation.positive_status }}
+
+                    {{ validation.positive_status if validation else 'N/A' }}
+
                 </td>
 
             </tr>
@@ -167,7 +180,9 @@
                 </td>
 
                 <td>
-                    {{ validation.negative_status }}
+
+                    {{ validation.negative_status if validation else 'N/A' }}
+
                 </td>
 
             </tr>
@@ -179,7 +194,9 @@
                 </td>
 
                 <td>
-                    {{ validation.overall_sentiment }}
+
+                    {{ validation.overall_sentiment if validation else 'N/A' }}
+
                 </td>
 
             </tr>
@@ -189,7 +206,7 @@
     </div>
 
     <!-- ================================================== -->
-    <!-- SENTIMENT BREAKDOWN -->
+    <!-- SENTIMENT -->
     <!-- ================================================== -->
 
     <div class="section">
@@ -208,7 +225,8 @@
 
                 <div class="metric">
 
-                    {{ analytics.positive_percent }}%
+                    {{ analytics.positive_percent if analytics else 0 }}%
+
                 </div>
 
             </div>
@@ -221,7 +239,8 @@
 
                 <div class="metric">
 
-                    {{ analytics.neutral_percent }}%
+                    {{ analytics.neutral_percent if analytics else 0 }}%
+
                 </div>
 
             </div>
@@ -234,7 +253,8 @@
 
                 <div class="metric">
 
-                    {{ analytics.negative_percent }}%
+                    {{ analytics.negative_percent if analytics else 0 }}%
+
                 </div>
 
             </div>
@@ -246,6 +266,8 @@
     <!-- ================================================== -->
     <!-- PIE CHART -->
     <!-- ================================================== -->
+
+    {% if charts and charts.pie_chart %}
 
     <div class="section">
 
@@ -260,9 +282,13 @@
 
     </div>
 
+    {% endif %}
+
     <!-- ================================================== -->
     <!-- BAR CHART -->
     <!-- ================================================== -->
+
+    {% if charts and charts.bar_chart %}
 
     <div class="section">
 
@@ -276,6 +302,8 @@
         >
 
     </div>
+
+    {% endif %}
 
     <!-- ================================================== -->
     <!-- TOP STRENGTHS -->
@@ -301,21 +329,35 @@
 
             </tr>
 
-            {% for item in analytics.top_strengths %}
+            {% if analytics and analytics.top_strengths %}
 
-            <tr>
+                {% for item in analytics.top_strengths %}
 
-                <td>
-                    {{ item[0] }}
-                </td>
+                <tr>
 
-                <td>
-                    {{ item[1] }}
-                </td>
+                    <td>
+                        {{ item[0] }}
+                    </td>
 
-            </tr>
+                    <td>
+                        {{ item[1] }}
+                    </td>
 
-            {% endfor %}
+                </tr>
+
+                {% endfor %}
+
+            {% else %}
+
+                <tr>
+
+                    <td colspan="2">
+                        No strengths available
+                    </td>
+
+                </tr>
+
+            {% endif %}
 
         </table>
 
@@ -345,21 +387,35 @@
 
             </tr>
 
-            {% for item in analytics.top_issues %}
+            {% if analytics and analytics.top_issues %}
 
-            <tr>
+                {% for item in analytics.top_issues %}
 
-                <td>
-                    {{ item[0] }}
-                </td>
+                <tr>
 
-                <td>
-                    {{ item[1] }}
-                </td>
+                    <td>
+                        {{ item[0] }}
+                    </td>
 
-            </tr>
+                    <td>
+                        {{ item[1] }}
+                    </td>
 
-            {% endfor %}
+                </tr>
+
+                {% endfor %}
+
+            {% else %}
+
+                <tr>
+
+                    <td colspan="2">
+                        No issues available
+                    </td>
+
+                </tr>
+
+            {% endif %}
 
         </table>
 
@@ -368,6 +424,8 @@
     <!-- ================================================== -->
     <!-- WORD CLOUD -->
     <!-- ================================================== -->
+
+    {% if wordcloud %}
 
     <div class="section">
 
@@ -382,6 +440,8 @@
 
     </div>
 
+    {% endif %}
+
     <!-- ================================================== -->
     <!-- AI SUMMARY -->
     <!-- ================================================== -->
@@ -394,7 +454,7 @@
 
         <div class="summary-box">
 
-            {{ ai.executive_summary }}
+            {{ ai.get('executive_summary', 'No executive summary available.') if ai else 'No AI summary available.' }}
 
         </div>
 
@@ -412,7 +472,7 @@
 
         <div class="summary-box">
 
-            {{ ai.recommendations }}
+            {{ ai.get('recommendations', 'No recommendations available.') if ai else 'No recommendations available.' }}
 
         </div>
 
@@ -430,7 +490,7 @@
 
         <div class="risk-box">
 
-            {{ analytics.retention_risk }}
+            {{ analytics.retention_risk if analytics else 'N/A' }}
 
         </div>
 
