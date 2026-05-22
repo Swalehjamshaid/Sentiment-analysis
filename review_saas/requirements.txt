@@ -208,5 +208,17 @@ camoufox
 groq>=0.9.0
 openai>=1.30.0
 httpx>=0.25.2,<0.28.0
+# ==========================================================
+# WORLD-CLASS EXECUTIVE AI REPORTING LIBRARIES
+# ==========================================================
+
+plotly==5.24.1
+kaleido==0.2.1
+weasyprint==62.3
+wordcloud==1.9.3
+textblob==0.18.0.post0
+spacy==3.8.2
+seaborn==0.13.2
+scikit-learn==1.5.2
 
 
