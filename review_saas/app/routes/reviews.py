@@ -1,13 +1,17 @@
 # ==========================================================
 # FILE: app/routes/reviews.py
 # TRUSTLYTICS AI SAAS - FINAL ENTERPRISE REVIEWS ROUTER
-# FIXES:
+# MAY 2026 PRODUCTION VERSION
+#
+# FEATURES:
+# ✅ /api/reviews/ingest/{company_id}
 # ✅ /api/reviews/all
+# ✅ Dashboard analytics
 # ✅ PostgreSQL review insertion
-# ✅ Dashboard review loading
-# ✅ Sync Reviews button
-# ✅ Duplicate review protection
-# ✅ Railway route registration
+# ✅ Duplicate protection
+# ✅ Railway safe
+# ✅ Enterprise logging
+# ✅ Frontend sync compatibility
 # ==========================================================
 
 import logging
@@ -93,7 +97,7 @@ async def reviews_health():
     }
 
 # ==========================================================
-# SAVE REVIEWS TO POSTGRESQL
+# SAVE REVIEWS
 # ==========================================================
 
 async def save_reviews(
@@ -107,6 +111,10 @@ async def save_reviews(
 
     inserted_reviews = []
 
+    inserted_count = 0
+
+    skipped_duplicates = 0
+
     for item in scraped_reviews:
 
         try:
@@ -115,9 +123,9 @@ async def save_reviews(
                 "review_id"
             )
 
-            # ==============================================
+            # ==================================================
             # DUPLICATE CHECK
-            # ==============================================
+            # ==================================================
 
             stmt = select(
                 Review
@@ -135,11 +143,14 @@ async def save_reviews(
             )
 
             if existing_review:
+
+                skipped_duplicates += 1
+
                 continue
 
-            # ==============================================
+            # ==================================================
             # CREATE REVIEW OBJECT
-            # ==============================================
+            # ==================================================
 
             review = Review(
 
@@ -170,6 +181,8 @@ async def save_reviews(
 
             db.add(review)
 
+            inserted_count += 1
+
             inserted_reviews.append({
 
                 "author_name":
@@ -179,7 +192,7 @@ async def save_reviews(
                     review.rating,
 
                 "text":
-                    review.text[:100]
+                    review.text[:120]
             })
 
         except Exception as inner_error:
@@ -190,10 +203,14 @@ async def save_reviews(
 
     await db.commit()
 
+    logger.info(
+        f"✅ INSERTED={inserted_count} | DUPLICATES={skipped_duplicates}"
+    )
+
     return inserted_reviews
 
 # ==========================================================
-# SYNC REVIEWS
+# SYNC REVIEWS MANUAL
 # ==========================================================
 
 @router.post("/sync")
@@ -215,9 +232,9 @@ async def sync_reviews(
 
     try:
 
-        # ==============================================
-        # COMPANY VALIDATION
-        # ==============================================
+        # ==================================================
+        # COMPANY CHECK
+        # ==================================================
 
         stmt = select(
             Company
@@ -242,9 +259,9 @@ async def sync_reviews(
                     "Company not found"
             )
 
-        # ==============================================
+        # ==================================================
         # SCRAPE REVIEWS
-        # ==============================================
+        # ==================================================
 
         scraped_reviews = await scrape_google_reviews(
 
@@ -257,9 +274,9 @@ async def sync_reviews(
             f"✅ SCRAPED => {len(scraped_reviews)}"
         )
 
-        # ==============================================
+        # ==================================================
         # SAVE REVIEWS
-        # ==============================================
+        # ==================================================
 
         inserted_reviews = await save_reviews(
 
@@ -314,6 +331,8 @@ async def sync_reviews(
 
 # ==========================================================
 # FRONTEND INGEST ROUTE
+# THIS FIXES:
+# /api/reviews/ingest/11
 # ==========================================================
 
 @router.post("/ingest/{company_id}")
@@ -330,6 +349,10 @@ async def ingest_reviews(
     )
 
     try:
+
+        # ==================================================
+        # COMPANY VALIDATION
+        # ==================================================
 
         stmt = select(
             Company
@@ -354,9 +377,9 @@ async def ingest_reviews(
                     "Company not found"
             )
 
-        # ==============================================
-        # PLACE ID
-        # ==============================================
+        # ==================================================
+        # PLACE ID CHECK
+        # ==================================================
 
         place_id = getattr(
 
@@ -375,12 +398,16 @@ async def ingest_reviews(
                     status.HTTP_400_BAD_REQUEST,
 
                 detail=
-                    "Company missing Google Place ID"
+                    "Google Place ID missing"
             )
 
-        # ==============================================
-        # SCRAPE
-        # ==============================================
+        logger.info(
+            f"📍 PLACE ID => {place_id}"
+        )
+
+        # ==================================================
+        # SCRAPER CALL
+        # ==================================================
 
         scraped_reviews = await scrape_google_reviews(
 
@@ -393,9 +420,25 @@ async def ingest_reviews(
             f"✅ SCRAPED => {len(scraped_reviews)}"
         )
 
-        # ==============================================
-        # SAVE
-        # ==============================================
+        if not scraped_reviews:
+
+            return {
+
+                "success": False,
+
+                "message":
+                    "No reviews scraped.",
+
+                "company_id":
+                    company_id,
+
+                "reviews_collected":
+                    0
+            }
+
+        # ==================================================
+        # SAVE TO DATABASE
+        # ==================================================
 
         inserted_reviews = await save_reviews(
 
@@ -416,6 +459,9 @@ async def ingest_reviews(
 
             "company_id":
                 company_id,
+
+            "scraped_reviews":
+                len(scraped_reviews),
 
             "reviews_collected":
                 len(inserted_reviews),
@@ -448,8 +494,6 @@ async def ingest_reviews(
 
 # ==========================================================
 # GET ALL REVIEWS
-# THIS FIXES:
-# /api/reviews/all?company_id=1
 # ==========================================================
 
 @router.get("/all")
@@ -558,9 +602,9 @@ async def dashboard_stats(
 
     try:
 
-        # ==============================================
+        # ==================================================
         # TOTAL REVIEWS
-        # ==============================================
+        # ==================================================
 
         total_stmt = (
 
@@ -581,9 +625,9 @@ async def dashboard_stats(
             total_result.scalar() or 0
         )
 
-        # ==============================================
-        # AVG RATING
-        # ==============================================
+        # ==================================================
+        # AVERAGE RATING
+        # ==================================================
 
         avg_stmt = (
 
@@ -603,6 +647,7 @@ async def dashboard_stats(
         average_rating = avg_result.scalar()
 
         if average_rating is None:
+
             average_rating = 0
 
         average_rating = round(
@@ -610,9 +655,9 @@ async def dashboard_stats(
             2
         )
 
-        # ==============================================
+        # ==================================================
         # RECENT REVIEWS
-        # ==============================================
+        # ==================================================
 
         recent_stmt = (
 
