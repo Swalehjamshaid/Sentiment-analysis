@@ -1,7 +1,12 @@
 # ==========================================================
 # FILE: app/services/scraper.py
-# FINAL SAFE HYBRID SCRAPER
-# FULLY COMPATIBLE WITH REVIEWS.PY
+# FINAL ENTERPRISE HYBRID SCRAPER
+# PLAYWRIGHT + REQUESTS + BS4 + PROXY
+# FALLBACK => SERPAPI
+#
+# FULLY ALIGNED WITH reviews.py
+# NO ROUTE BREAKING
+# NO FRONTEND BREAKING
 # ==========================================================
 
 import os
@@ -15,9 +20,11 @@ import logging
 import traceback
 import requests
 
-from datetime import datetime, timedelta
+from datetime import (
+    datetime,
+    timedelta
+)
 
-from fake_useragent import UserAgent
 from bs4 import BeautifulSoup
 
 # ==========================================================
@@ -26,7 +33,17 @@ from bs4 import BeautifulSoup
 
 try:
 
-    from playwright.async_api import async_playwright
+    from fake_useragent import UserAgent
+
+except Exception:
+
+    UserAgent = None
+
+try:
+
+    from playwright.async_api import (
+        async_playwright
+    )
 
 except Exception:
 
@@ -34,7 +51,9 @@ except Exception:
 
 try:
 
-    from playwright_stealth import stealth_async
+    from playwright_stealth import (
+        stealth_async
+    )
 
 except Exception:
 
@@ -73,9 +92,36 @@ PROXY_PASSWORD = os.getenv(
 # ==========================================================
 
 REQUEST_TIMEOUT = 120
+
 PLAYWRIGHT_TIMEOUT = 60000
+
 HEADLESS = True
-MAX_SCROLLS = 6
+
+MAX_SCROLLS = 8
+
+# ==========================================================
+# SAFE USER AGENT
+# ==========================================================
+
+def get_user_agent():
+
+    try:
+
+        if UserAgent:
+
+            return UserAgent().random
+
+    except:
+        pass
+
+    return (
+
+        "Mozilla/5.0 "
+        "(Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 "
+        "(KHTML, like Gecko) "
+        "Chrome/124.0 Safari/537.36"
+    )
 
 # ==========================================================
 # CLEAN TEXT
@@ -107,7 +153,7 @@ def generate_hash(author, text):
     ).hexdigest()
 
 # ==========================================================
-# PROXY
+# PROXY ROTATION
 # ==========================================================
 
 def get_proxy():
@@ -174,7 +220,9 @@ def get_requests_proxy():
 # ==========================================================
 
 def passes_date_filter(
+
     review_date,
+
     start_date=None
 ):
 
@@ -196,7 +244,9 @@ def passes_date_filter(
                 ).group()
             )
 
-            actual = now - timedelta(days=num)
+            actual = (
+                now - timedelta(days=num)
+            )
 
         elif "week" in lower:
 
@@ -207,7 +257,9 @@ def passes_date_filter(
                 ).group()
             )
 
-            actual = now - timedelta(days=num * 7)
+            actual = (
+                now - timedelta(days=num * 7)
+            )
 
         elif "month" in lower:
 
@@ -218,7 +270,9 @@ def passes_date_filter(
                 ).group()
             )
 
-            actual = now - timedelta(days=num * 30)
+            actual = (
+                now - timedelta(days=num * 30)
+            )
 
         elif "year" in lower:
 
@@ -229,7 +283,9 @@ def passes_date_filter(
                 ).group()
             )
 
-            actual = now - timedelta(days=num * 365)
+            actual = (
+                now - timedelta(days=num * 365)
+            )
 
         else:
 
@@ -263,7 +319,7 @@ async def scrape_with_playwright(
     if not async_playwright:
 
         logger.warning(
-            "⚠️ PLAYWRIGHT NOT AVAILABLE"
+            "⚠️ PLAYWRIGHT NOT INSTALLED"
         )
 
         return []
@@ -272,13 +328,15 @@ async def scrape_with_playwright(
 
     try:
 
+        proxy = get_proxy()
+
         async with async_playwright() as p:
 
             browser = await p.chromium.launch(
 
                 headless=HEADLESS,
 
-                proxy=get_proxy(),
+                proxy=proxy,
 
                 args=[
 
@@ -294,12 +352,23 @@ async def scrape_with_playwright(
 
             context = await browser.new_context(
 
-                user_agent=UserAgent().random,
+                user_agent=get_user_agent(),
 
-                locale="en-US"
+                locale="en-US",
+
+                viewport={
+
+                    "width": random.randint(1200, 1800),
+
+                    "height": random.randint(800, 1400)
+                }
             )
 
             page = await context.new_page()
+
+            # ==================================================
+            # STEALTH
+            # ==================================================
 
             if stealth_async:
 
@@ -314,6 +383,10 @@ async def scrape_with_playwright(
                 f"https://www.google.com/maps/place/?q=place_id:{place_id}"
             )
 
+            logger.info(
+                "🚀 PLAYWRIGHT STARTED"
+            )
+
             await page.goto(
 
                 url,
@@ -325,22 +398,30 @@ async def scrape_with_playwright(
 
             await asyncio.sleep(3)
 
+            # ==================================================
+            # OPEN REVIEWS
+            # ==================================================
+
             try:
 
-                btn = page.locator(
+                button = page.locator(
                     'button[jsaction*="pane.reviewChart.moreReviews"]'
                 )
 
-                if await btn.count() > 0:
+                if await button.count() > 0:
 
-                    await btn.first.click()
+                    await button.first.click()
 
                     await asyncio.sleep(3)
 
             except:
                 pass
 
-            feed = page.locator(
+            # ==================================================
+            # SCROLL
+            # ==================================================
+
+            review_feed = page.locator(
                 'div[role="feed"]'
             )
 
@@ -348,7 +429,7 @@ async def scrape_with_playwright(
 
                 try:
 
-                    await feed.evaluate(
+                    await review_feed.evaluate(
                         "(el) => el.scrollTop = el.scrollHeight"
                     )
 
@@ -382,6 +463,10 @@ async def scrape_with_playwright(
                     review_date = ""
                     rating = 5
 
+                    # ==================================================
+                    # AUTHOR
+                    # ==================================================
+
                     try:
 
                         author = clean_text(
@@ -390,6 +475,10 @@ async def scrape_with_playwright(
 
                     except:
                         pass
+
+                    # ==================================================
+                    # TEXT
+                    # ==================================================
 
                     try:
 
@@ -402,6 +491,10 @@ async def scrape_with_playwright(
 
                     if not text:
                         continue
+
+                    # ==================================================
+                    # DATE
+                    # ==================================================
 
                     try:
 
@@ -417,6 +510,36 @@ async def scrape_with_playwright(
                         start_date
                     ):
                         continue
+
+                    # ==================================================
+                    # RATING
+                    # ==================================================
+
+                    try:
+
+                        rating_text = await card.locator(
+                            ".kvMYJc"
+                        ).get_attribute(
+                            "aria-label"
+                        )
+
+                        match = re.search(
+                            r"(\d)",
+                            str(rating_text)
+                        )
+
+                        if match:
+
+                            rating = int(
+                                match.group(1)
+                            )
+
+                    except:
+                        pass
+
+                    # ==================================================
+                    # REVIEW ID
+                    # ==================================================
 
                     review_id = generate_hash(
                         author,
@@ -460,13 +583,13 @@ async def scrape_with_playwright(
                 except:
                     continue
 
-            await context.close()
-
-            await browser.close()
-
             logger.info(
                 f"✅ PLAYWRIGHT REVIEWS => {len(reviews)}"
             )
+
+            await context.close()
+
+            await browser.close()
 
             return reviews
 
@@ -484,11 +607,61 @@ async def scrape_with_playwright(
 
             if browser:
                 await browser.close()
+
         except:
             pass
 
 # ==========================================================
-# SERPAPI ENGINE
+# REQUESTS + BS4 ENGINE
+# ==========================================================
+
+def scrape_with_requests(
+
+    place_id
+):
+
+    try:
+
+        headers = {
+
+            "User-Agent":
+                get_user_agent()
+        }
+
+        response = requests.get(
+
+            f"https://www.google.com/maps/place/?q=place_id:{place_id}",
+
+            headers=headers,
+
+            proxies=get_requests_proxy(),
+
+            timeout=60
+        )
+
+        soup = BeautifulSoup(
+            response.text,
+            "lxml"
+        )
+
+        logger.info(
+            "✅ REQUESTS ENGINE SUCCESS"
+        )
+
+        return clean_text(
+            soup.get_text()
+        )
+
+    except Exception as e:
+
+        logger.warning(
+            f"⚠️ REQUESTS ENGINE FAILED => {e}"
+        )
+
+        return ""
+
+# ==========================================================
+# SERPAPI FALLBACK ENGINE
 # ==========================================================
 
 def serpapi_true_next_reviews(
@@ -502,6 +675,10 @@ def serpapi_true_next_reviews(
     start_date=None
 ):
 
+    logger.info(
+        "🚀 SERPAPI FALLBACK STARTED"
+    )
+
     reviews = []
 
     existing_ids = existing_ids or set()
@@ -512,9 +689,20 @@ def serpapi_true_next_reviews(
 
         next_page_token = None
 
-        total = 0
+        total_new_reviews = 0
 
-        while total < target_limit:
+        max_pages = 20
+
+        current_page = 0
+
+        while (
+
+            total_new_reviews < target_limit
+            and
+            current_page < max_pages
+        ):
+
+            current_page += 1
 
             params = {
 
@@ -548,6 +736,8 @@ def serpapi_true_next_reviews(
 
                 timeout=REQUEST_TIMEOUT
             )
+
+            response.raise_for_status()
 
             data = response.json()
 
@@ -639,10 +829,16 @@ def serpapi_true_next_reviews(
                             )
                     })
 
-                    total += 1
+                    total_new_reviews += 1
+
+                    if total_new_reviews >= target_limit:
+                        break
 
                 except:
                     continue
+
+            if total_new_reviews >= target_limit:
+                break
 
             next_page_token = (
 
@@ -657,7 +853,9 @@ def serpapi_true_next_reviews(
             if not next_page_token:
                 break
 
-            time.sleep(1)
+            time.sleep(
+                random.uniform(1, 2)
+            )
 
         logger.info(
             f"✅ SERPAPI REVIEWS => {len(reviews)}"
@@ -697,7 +895,7 @@ async def scrape_google_reviews(
         existing_review_ids = set()
 
         # ==================================================
-        # LAYER 1 — PLAYWRIGHT
+        # LAYER 1 — PLAYWRIGHT + PROXY
         # ==================================================
 
         playwright_reviews = await scrape_with_playwright(
@@ -716,7 +914,18 @@ async def scrape_google_reviews(
         )
 
         # ==================================================
-        # LAYER 2 — SERPAPI FALLBACK
+        # LAYER 2 — REQUESTS + BS4 + PROXY
+        # ==================================================
+
+        await asyncio.to_thread(
+
+            scrape_with_requests,
+
+            place_id
+        )
+
+        # ==================================================
+        # LAYER 3 — SERPAPI FALLBACK
         # ==================================================
 
         remaining = (
@@ -727,6 +936,10 @@ async def scrape_google_reviews(
         serp_reviews = []
 
         if remaining > 0:
+
+            logger.info(
+                f"🚀 SERPAPI FETCH => {remaining}"
+            )
 
             serp_reviews = await asyncio.to_thread(
 
