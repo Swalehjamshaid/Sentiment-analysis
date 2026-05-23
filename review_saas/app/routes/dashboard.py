@@ -257,10 +257,9 @@ async def get_reviews_from_db(
                 Review.company_id == company_id
             )
 
-            .order_by(
-                desc(Review.created_at)
-            )
-
+           .order_by(
+    desc(Review.google_review_time)
+)
             .limit(limit)
         )
 
@@ -330,9 +329,20 @@ async def get_dashboard_data(
 
             try:
 
-                created_at = safe_get(
-                    review,
-                    "created_at"
+               created_at = (
+
+    safe_get(
+        review,
+        "google_review_time"
+    )
+
+    or
+
+    safe_get(
+        review,
+        "created_at"
+    )
+)
                 )
 
                 if not created_at:
@@ -443,11 +453,20 @@ async def get_dashboard_data(
             # ==============================================
 
             try:
+created_at = (
 
-                created_at = safe_get(
-                    review,
-                    "created_at"
-                )
+    safe_get(
+        review,
+        "google_review_time"
+    )
+
+    or
+
+    safe_get(
+        review,
+        "created_at"
+    )
+)
 
                 if created_at:
 
@@ -1103,12 +1122,21 @@ async def get_company_reviews(
                         ""
                     ),
 
-                "created_at":
-                    safe_get(
-                        review,
-                        "created_at",
-                        "-"
-                    ),
+               "created_at":
+
+    safe_get(
+        review,
+        "google_review_time",
+        None
+    )
+
+    or
+
+    safe_get(
+        review,
+        "created_at",
+        "-"
+    ),
 
                 "sentiment":
                     sentiment,
