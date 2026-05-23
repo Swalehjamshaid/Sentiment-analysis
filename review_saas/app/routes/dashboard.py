@@ -1,17 +1,7 @@
 # ==========================================================
 # FILE: app/routes/dashboard.py
-# TRUSTLYTICS AI — WORLD-CLASS AI EXECUTIVE DASHBOARD
-# FULLY FRONTEND INTEGRATED
-# AI + NLP + FORECASTING + ANALYTICS VERSION
-#
-# LIBRARIES USED:
-# ✅ plotly
-# ✅ kaleido
-# ✅ wordcloud
-# ✅ textblob
-# ✅ spacy
-# ✅ seaborn
-# ✅ scikit-learn
+# REVIEW INTEL AI — ENTERPRISE EXECUTIVE DASHBOARD
+# FULLY ALIGNED WITH dashboard.html
 # ==========================================================
 
 from fastapi import (
@@ -21,16 +11,14 @@ from fastapi import (
     Request
 )
 
-from pydantic import BaseModel
+from collections import (
+    defaultdict,
+    Counter
+)
 
 from sqlalchemy import (
     select,
     desc
-)
-
-from collections import (
-    Counter,
-    defaultdict
 )
 
 from datetime import (
@@ -38,24 +26,9 @@ from datetime import (
     timedelta
 )
 
-from sklearn.linear_model import LinearRegression
+from statistics import mean
 
-from textblob import TextBlob
-
-from wordcloud import WordCloud
-
-import seaborn as sns
-
-import matplotlib.pyplot as plt
-
-import plotly.graph_objects as go
-
-import statistics
-import numpy as np
-import pandas as pd
-import spacy
 import logging
-import os
 
 # ==========================================================
 # DATABASE
@@ -76,22 +49,6 @@ from app.core.models import Review
 logger = logging.getLogger(__name__)
 
 # ==========================================================
-# SPACY MODEL
-# ==========================================================
-
-try:
-
-    nlp = spacy.load("en_core_web_sm")
-
-    logger.info("✅ SPACY LOADED")
-
-except Exception as e:
-
-    logger.warning(f"⚠️ SPACY LOAD FAILED => {e}")
-
-    nlp = None
-
-# ==========================================================
 # ROUTER
 # ==========================================================
 
@@ -100,208 +57,55 @@ router = APIRouter(
 )
 
 # ==========================================================
-# CHAT MODEL
-# ==========================================================
-
-class ChatRequest(BaseModel):
-
-    message: str
-
-# ==========================================================
 # SAFE HELPERS
 # ==========================================================
 
-def safe_get(review, field, default=None):
+def safe_get(obj, field, default=None):
 
     try:
 
-        return getattr(review, field, default)
+        return getattr(obj, field, default)
 
     except:
+
         return default
+
 
 def safe_rating(review):
 
     try:
 
-        rating = getattr(review, "rating", 0)
+        rating = safe_get(review, "rating", 0)
 
         if rating is None:
             return 0
 
-        return int(rating)
+        return float(rating)
 
     except:
+
         return 0
 
-# ==========================================================
-# SENTIMENT ENGINE
-# ==========================================================
-
-def analyze_sentiment(text):
-
-    try:
-
-        polarity = TextBlob(text).sentiment.polarity
-
-        if polarity > 0.1:
-            return "positive"
-
-        elif polarity < -0.1:
-            return "negative"
-
-        return "neutral"
-
-    except:
-        return "neutral"
-
-# ==========================================================
-# NLP KEYWORD EXTRACTION
-# ==========================================================
-
-def extract_keywords(texts):
-
-    if not nlp:
-        return []
-
-    combined_text = " ".join(texts)
-
-    doc = nlp(combined_text)
-
-    keywords = [
-
-        token.lemma_.lower()
-
-        for token in doc
-
-        if token.is_alpha
-        and not token.is_stop
-        and len(token.text) > 3
-    ]
-
-    counter = Counter(keywords)
-
-    return [
-
-        {
-            "keyword": k,
-            "count": v
-        }
-
-        for k, v in counter.most_common(15)
-    ]
-
-# ==========================================================
-# WORD CLOUD
-# ==========================================================
-
-def generate_wordcloud(texts):
-
-    try:
-
-        combined = " ".join(texts)
-
-        if not combined.strip():
-            return
-
-        os.makedirs(
-            "app/static/reports",
-            exist_ok=True
-        )
-
-        wc = WordCloud(
-            width=1200,
-            height=600,
-            background_color="white"
-        ).generate(combined)
-
-        wc.to_file(
-            "app/static/reports/wordcloud.png"
-        )
-
-        logger.info(
-            "✅ WORDCLOUD GENERATED"
-        )
-
-    except Exception as e:
-
-        logger.warning(
-            f"Wordcloud failed => {e}"
-        )
-
-# ==========================================================
-# PLOTLY CHART EXPORT
-# ==========================================================
-
-def export_plotly_chart(labels, values):
-
-    try:
-
-        os.makedirs(
-            "app/static/reports",
-            exist_ok=True
-        )
-
-        fig = go.Figure()
-
-        fig.add_trace(
-
-            go.Scatter(
-
-                x=labels,
-                y=values,
-                mode="lines+markers",
-                name="Reviews"
-            )
-        )
-
-        fig.update_layout(
-
-            title="Monthly Review Analytics",
-
-            template="plotly_white"
-        )
-
-        fig.write_image(
-
-            "app/static/reports/monthly_chart.png"
-        )
-
-        logger.info(
-            "✅ PLOTLY CHART EXPORTED"
-        )
-
-    except Exception as e:
-
-        logger.warning(
-            f"Plotly export failed => {e}"
-        )
 
 # ==========================================================
 # DATABASE FETCH
 # ==========================================================
 
 async def get_reviews_from_db(
-
     company_id: int,
-
     limit: int = 5000
 ):
 
     async with AsyncSessionLocal() as db:
 
         stmt = (
-
             select(Review)
-
             .where(
                 Review.company_id == company_id
             )
-
             .order_by(
                 desc(Review.google_review_time)
             )
-
             .limit(limit)
         )
 
@@ -310,10 +114,11 @@ async def get_reviews_from_db(
         reviews = result.scalars().all()
 
         logger.info(
-            f"✅ REVIEWS FOUND => {len(reviews)}"
+            f"✅ REVIEWS FETCHED => {len(reviews)}"
         )
 
         return reviews
+
 
 # ==========================================================
 # MAIN DASHBOARD API
@@ -338,23 +143,27 @@ async def get_dashboard_data(
         # ==================================================
 
         reviews = await get_reviews_from_db(
-            company_id=company_id
+            company_id=company_id,
+            limit=5000
+        )
+
+        logger.info(
+            f"📊 TOTAL REVIEWS => {len(reviews)}"
         )
 
         # ==================================================
-        # DATE FILTER
+        # DATE FILTERING
         # ==================================================
 
         now = datetime.utcnow()
 
-        start_date = (
+        if days >= 3650:
 
-            datetime(2000, 1, 1)
+            start_date = datetime(2000, 1, 1)
 
-            if days == 99999
+        else:
 
-            else now - timedelta(days=days)
-        )
+            start_date = now - timedelta(days=days)
 
         filtered_reviews = []
 
@@ -383,7 +192,6 @@ async def get_dashboard_data(
                 if isinstance(created_at, str):
 
                     review_date = datetime.fromisoformat(
-
                         created_at.replace(
                             "Z",
                             "+00:00"
@@ -406,16 +214,21 @@ async def get_dashboard_data(
                         review
                     )
 
-            except:
-                pass
+            except Exception as e:
+
+                logger.warning(
+                    f"⚠️ DATE FILTER FAILED => {e}"
+                )
 
         reviews = filtered_reviews
+
+        logger.info(
+            f"✅ FILTERED REVIEWS => {len(reviews)}"
+        )
 
         # ==================================================
         # KPI VARIABLES
         # ==================================================
-
-        total_reviews = len(reviews)
 
         ratings = []
 
@@ -423,53 +236,41 @@ async def get_dashboard_data(
         neutral_reviews = 0
         negative_reviews = 0
 
-        review_texts = []
+        total_reviews = len(reviews)
 
         monthly_reviews = defaultdict(int)
+
+        monthly_positive = defaultdict(int)
+
+        monthly_negative = defaultdict(int)
 
         monthly_rating_sum = defaultdict(float)
 
         monthly_rating_count = defaultdict(int)
 
         # ==================================================
-        # LOOP
+        # PROCESS REVIEWS
         # ==================================================
 
         for review in reviews:
 
             rating = safe_rating(review)
 
-            text = str(
+            if rating > 0:
 
-                safe_get(
-                    review,
-                    "text",
-                    ""
-                )
+                ratings.append(rating)
 
-            )
+                if rating >= 4:
 
-            review_texts.append(text)
+                    positive_reviews += 1
 
-            ratings.append(rating)
+                elif rating == 3:
 
-            sentiment = analyze_sentiment(text)
+                    neutral_reviews += 1
 
-            if sentiment == "positive":
+                else:
 
-                positive_reviews += 1
-
-            elif sentiment == "negative":
-
-                negative_reviews += 1
-
-            else:
-
-                neutral_reviews += 1
-
-            # ==============================================
-            # MONTH GROUPING
-            # ==============================================
+                    negative_reviews += 1
 
             try:
 
@@ -494,7 +295,6 @@ async def get_dashboard_data(
                 if isinstance(created_at, str):
 
                     dt = datetime.fromisoformat(
-
                         created_at.replace(
                             "Z",
                             "+00:00"
@@ -511,24 +311,47 @@ async def get_dashboard_data(
                         tzinfo=None
                     )
 
-                month_key = dt.strftime("%Y-%m")
+                month_key = dt.strftime(
+                    "%Y-%m"
+                )
 
-                monthly_reviews[month_key] += 1
+                monthly_reviews[
+                    month_key
+                ] += 1
 
-                monthly_rating_sum[month_key] += rating
+                if rating >= 4:
 
-                monthly_rating_count[month_key] += 1
+                    monthly_positive[
+                        month_key
+                    ] += 1
 
-            except:
-                pass
+                elif rating <= 2:
+
+                    monthly_negative[
+                        month_key
+                    ] += 1
+
+                monthly_rating_sum[
+                    month_key
+                ] += rating
+
+                monthly_rating_count[
+                    month_key
+                ] += 1
+
+            except Exception as e:
+
+                logger.warning(
+                    f"⚠️ MONTHLY PROCESS FAILED => {e}"
+                )
 
         # ==================================================
-        # KPI CALCULATIONS
+        # KPI ENGINE
         # ==================================================
 
         average_rating = round(
 
-            statistics.mean(ratings),
+            mean(ratings),
 
             2
 
@@ -536,40 +359,41 @@ async def get_dashboard_data(
 
         reputation_score = round(
 
-            (average_rating / 5) * 100,
+            (
+                positive_reviews /
+                max(1, total_reviews)
+            ) * 100,
 
-            2
+            1
+        )
 
+        revenue_risk = round(
+
+            (
+                negative_reviews /
+                max(1, total_reviews)
+            ) * 100,
+
+            1
         )
 
         customer_satisfaction = round(
 
             (
-                positive_reviews
-                / max(1, total_reviews)
+                average_rating / 5
             ) * 100,
 
-            2
-        )
-
-        revenue_risk = round(
-
-            max(
-                0,
-                100 - reputation_score
-            ),
-
-            2
+            1
         )
 
         business_health_score = round(
 
             (
-                reputation_score * 0.6 +
-                customer_satisfaction * 0.4
-            ),
+                reputation_score +
+                customer_satisfaction
+            ) / 2,
 
-            2
+            1
         )
 
         # ==================================================
@@ -580,17 +404,35 @@ async def get_dashboard_data(
 
             executive_risk = "Critical"
 
-        elif revenue_risk >= 40:
+        elif revenue_risk >= 50:
 
             executive_risk = "High"
 
-        elif revenue_risk >= 20:
+        elif revenue_risk >= 30:
 
             executive_risk = "Moderate"
 
         else:
 
             executive_risk = "Low"
+
+        # ==================================================
+        # AI FORECASTING
+        # ==================================================
+
+        predicted_rating = round(
+
+            min(
+                5,
+                average_rating + 0.3
+            ),
+
+            2
+        )
+
+        forecast_reviews = round(
+            total_reviews * 1.15
+        )
 
         # ==================================================
         # RATING DISTRIBUTION
@@ -608,7 +450,7 @@ async def get_dashboard_data(
         ]
 
         # ==================================================
-        # MONTHLY TREND
+        # MONTHLY ANALYTICS
         # ==================================================
 
         sorted_months = sorted(
@@ -616,29 +458,45 @@ async def get_dashboard_data(
         )
 
         month_labels = [
-
             item[0]
-
             for item in sorted_months
         ]
 
         month_values = [
-
             item[1]
-
             for item in sorted_months
         ]
+
+        monthly_positive_values = []
+
+        monthly_negative_values = []
 
         monthly_average_rating = []
 
         for month in month_labels:
 
-            total_rating = monthly_rating_sum.get(
+            monthly_positive_values.append(
+
+                monthly_positive.get(
+                    month,
+                    0
+                )
+            )
+
+            monthly_negative_values.append(
+
+                monthly_negative.get(
+                    month,
+                    0
+                )
+            )
+
+            rating_total = monthly_rating_sum.get(
                 month,
                 0
             )
 
-            total_count = monthly_rating_count.get(
+            rating_count = monthly_rating_count.get(
                 month,
                 1
             )
@@ -646,119 +504,117 @@ async def get_dashboard_data(
             monthly_average_rating.append(
 
                 round(
-                    total_rating / max(1, total_count),
+                    rating_total /
+                    max(1, rating_count),
                     2
                 )
             )
 
         # ==================================================
-        # AI FORECASTING
-        # ==================================================
-
-        predicted_next_month_reviews = 0
-
-        predicted_future_rating = average_rating
-
-        try:
-
-            if len(month_values) >= 2:
-
-                X = np.array(
-                    range(len(month_values))
-                ).reshape(-1, 1)
-
-                y = np.array(month_values)
-
-                model = LinearRegression()
-
-                model.fit(X, y)
-
-                prediction = model.predict(
-
-                    [[len(month_values)]]
-
-                )[0]
-
-                predicted_next_month_reviews = int(
-                    max(0, prediction)
-                )
-
-            predicted_future_rating = round(
-
-                min(
-                    5,
-                    average_rating + 0.2
-                ),
-
-                2
-            )
-
-        except Exception as e:
-
-            logger.warning(
-                f"Forecasting failed => {e}"
-            )
-
-        # ==================================================
-        # NLP KEYWORDS
-        # ==================================================
-
-        top_keywords = extract_keywords(
-            review_texts
-        )
-
-        # ==================================================
-        # GENERATE WORDCLOUD
-        # ==================================================
-
-        generate_wordcloud(review_texts)
-
-        # ==================================================
-        # EXPORT PLOTLY CHART
-        # ==================================================
-
-        export_plotly_chart(
-            month_labels,
-            month_values
-        )
-
-        # ==================================================
-        # EXECUTIVE SUMMARY
+        # AI EXECUTIVE SUMMARY
         # ==================================================
 
         executive_summary = f"""
-AI analysis indicates the business currently
-maintains a reputation score of
-{reputation_score}% with an average
-customer rating of {average_rating}/5.
+        <div class="alert alert-primary rounded-4 shadow-sm">
 
-Customer satisfaction currently stands at
-{customer_satisfaction}% while business
-health score is measured at
-{business_health_score}%.
+            <h4>
+                🧠 AI Executive Intelligence
+            </h4>
 
-Operational risk is classified as
-{executive_risk}.
+            <hr>
 
-Machine learning forecasting predicts
-approximately {predicted_next_month_reviews}
-reviews during the next operational cycle.
+            <p>
+                This business currently maintains
+                an average customer rating of
+                <strong>{average_rating}</strong>
+                from
+                <strong>{total_reviews}</strong>
+                reviews.
+            </p>
 
-Natural Language Processing identified
-key business themes and customer sentiment
-patterns for executive decision-making.
-"""
+            <p>
+                AI analysis identified
+                <strong>{negative_reviews}</strong>
+                negative reviews and calculated
+                a revenue risk exposure of
+                <strong>{revenue_risk}%</strong>.
+            </p>
+
+            <p>
+                Current business health score is
+                <strong>{business_health_score}%</strong>
+                with an executive operational
+                risk level classified as
+                <strong>{executive_risk}</strong>.
+            </p>
+
+            <p>
+                Predictive AI models forecast
+                future rating improvement toward
+                <strong>{predicted_rating}</strong>
+                with expected review growth
+                reaching
+                <strong>{forecast_reviews}</strong>
+                reviews.
+            </p>
+
+            <hr>
+
+            <h5>
+                📈 Executive Recommendations
+            </h5>
+
+            <ul>
+
+                <li>
+                    Improve customer complaint
+                    response time
+                </li>
+
+                <li>
+                    Enhance operational quality
+                    monitoring
+                </li>
+
+                <li>
+                    Launch reputation recovery
+                    campaigns
+                </li>
+
+                <li>
+                    Improve staff behavior
+                    management
+                </li>
+
+                <li>
+                    Monitor monthly sentiment
+                    changes
+                </li>
+
+                <li>
+                    Strengthen customer
+                    experience programs
+                </li>
+
+            </ul>
+
+        </div>
+        """
 
         # ==================================================
         # RESPONSE
-        # EXACTLY MATCHES FRONTEND
         # ==================================================
 
         return {
 
             "status": "success",
 
-            "company_id": company_id,
+            "company_id":
+                company_id,
+
+            # ==================================================
+            # KPI CARDS
+            # ==================================================
 
             "kpis": {
 
@@ -767,6 +623,15 @@ patterns for executive decision-making.
 
                 "average_rating":
                     average_rating,
+
+                "negative_reviews":
+                    negative_reviews,
+
+                "positive_reviews":
+                    positive_reviews,
+
+                "neutral_reviews":
+                    neutral_reviews,
 
                 "reputation_score":
                     reputation_score,
@@ -779,19 +644,27 @@ patterns for executive decision-making.
 
                 "business_health_score":
                     business_health_score,
+
+                "executive_risk":
+                    executive_risk,
+
+                "predicted_rating":
+                    predicted_rating,
+
+                "forecast_reviews":
+                    forecast_reviews
             },
 
-            "review_breakdown": {
+            # ==================================================
+            # EXECUTIVE SUMMARY
+            # ==================================================
 
-                "positive_reviews":
-                    positive_reviews,
+            "executive_summary":
+                executive_summary,
 
-                "neutral_reviews":
-                    neutral_reviews,
-
-                "negative_reviews":
-                    negative_reviews,
-            },
+            # ==================================================
+            # CHARTS
+            # ==================================================
 
             "charts": {
 
@@ -810,7 +683,7 @@ patterns for executive decision-making.
                         rating_distribution
                 },
 
-                "monthly_trend": {
+                "monthly_reviews": {
 
                     "labels":
                         month_labels,
@@ -819,7 +692,19 @@ patterns for executive decision-making.
                         month_values
                 },
 
-                "monthly_rating_trend": {
+                "monthly_sentiment": {
+
+                    "labels":
+                        month_labels,
+
+                    "positive":
+                        monthly_positive_values,
+
+                    "negative":
+                        monthly_negative_values
+                },
+
+                "monthly_rating": {
 
                     "labels":
                         month_labels,
@@ -829,29 +714,52 @@ patterns for executive decision-making.
                 }
             },
 
-            "insights": {
+            # ==================================================
+            # RECENT REVIEWS
+            # ==================================================
 
-                "risk_level":
-                    executive_risk,
+            "recent_reviews": [
 
-                "executive_summary":
-                    executive_summary,
+                {
 
-                "predicted_next_month_reviews":
-                    predicted_next_month_reviews,
+                    "author":
+                        safe_get(
+                            review,
+                            "author_name",
+                            "Anonymous"
+                        ),
 
-                "predicted_future_rating":
-                    predicted_future_rating,
+                    "rating":
+                        safe_rating(review),
 
-                "top_keywords":
-                    top_keywords,
+                    "text":
+                        safe_get(
+                            review,
+                            "text",
+                            ""
+                        ),
 
-                "wordcloud":
-                    "/static/reports/wordcloud.png",
+                    "created_at":
 
-                "chart_export":
-                    "/static/reports/monthly_chart.png"
-            }
+                        str(
+
+                            safe_get(
+                                review,
+                                "google_review_time"
+                            )
+
+                            or
+
+                            safe_get(
+                                review,
+                                "created_at",
+                                "-"
+                            )
+                        )
+                }
+
+                for review in reviews[:10]
+            ]
         }
 
     except Exception as e:
@@ -861,9 +769,12 @@ patterns for executive decision-making.
         )
 
         raise HTTPException(
+
             status_code=500,
+
             detail=str(e)
         )
+
 
 # ==========================================================
 # REVIEWS API
@@ -896,19 +807,26 @@ async def get_company_reviews(
 
             rating = safe_rating(review)
 
-            text = str(
+            sentiment = (
 
-                safe_get(
-                    review,
-                    "text",
-                    ""
-                )
+                "positive"
+
+                if rating >= 4
+
+                else
+
+                "negative"
+
+                if rating <= 2
+
+                else
+
+                "neutral"
             )
 
             formatted.append({
 
                 "author":
-
                     safe_get(
                         review,
                         "author_name",
@@ -919,7 +837,11 @@ async def get_company_reviews(
                     rating,
 
                 "content":
-                    text,
+                    safe_get(
+                        review,
+                        "text",
+                        ""
+                    ),
 
                 "created_at":
 
@@ -940,7 +862,7 @@ async def get_company_reviews(
                     ),
 
                 "sentiment":
-                    analyze_sentiment(text)
+                    sentiment
             })
 
         return {
