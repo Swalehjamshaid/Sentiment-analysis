@@ -259,18 +259,17 @@ async def get_dashboard_data(
             if rating > 0:
 
                 ratings.append(rating)
+if rating >= 4:
 
-                if rating >= 4:
+    positive_reviews += 1
 
-                    positive_reviews += 1
+elif rating == 3:
 
-                elif rating == 3:
+    neutral_reviews += 1
 
-                    neutral_reviews += 1
+elif rating <= 2:
 
-                else:
-
-                    negative_reviews += 1
+    negative_reviews += 1
 
             try:
 
@@ -311,33 +310,35 @@ async def get_dashboard_data(
                         tzinfo=None
                     )
 
-                month_key = dt.strftime(
-                    "%Y-%m"
-                )
+if dt.year >= 2020:
 
-                monthly_reviews[
-                    month_key
-                ] += 1
+    month_key = dt.strftime(
+        "%Y-%m"
+    )
 
-                if rating >= 4:
+    monthly_reviews[
+        month_key
+    ] += 1
 
-                    monthly_positive[
-                        month_key
-                    ] += 1
+    if rating >= 4:
 
-                elif rating <= 2:
+        monthly_positive[
+            month_key
+        ] += 1
 
-                    monthly_negative[
-                        month_key
-                    ] += 1
+    elif rating <= 2:
 
-                monthly_rating_sum[
-                    month_key
-                ] += rating
+        monthly_negative[
+            month_key
+        ] += 1
 
-                monthly_rating_count[
-                    month_key
-                ] += 1
+    monthly_rating_sum[
+        month_key
+    ] += rating
+
+    monthly_rating_count[
+        month_key
+    ] += 1
 
             except Exception as e:
 
