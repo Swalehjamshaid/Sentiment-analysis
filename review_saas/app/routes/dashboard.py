@@ -1,41 +1,35 @@
 # ==========================================================
 # FILE: app/routes/dashboard.py
-# TRUSTLYTICS AI — ENTERPRISE STABLE DASHBOARD API
-# FULLY FIXED PRODUCTION VERSION
+# TRUSTLYTICS AI — FRONTEND INTEGRATED VERSION
+# FULLY COMPATIBLE WITH dashboard.html
 # ==========================================================
 
 from fastapi import (
     APIRouter,
     HTTPException,
     Query,
-    Request,
+    Request
 )
 
 from pydantic import BaseModel
 
-from typing import (
-    Dict,
-    Any,
-    List
-)
-
-import logging
-import statistics
-
-from datetime import (
-    datetime,
-    timedelta,
-)
-
 from collections import (
     Counter,
-    defaultdict,
+    defaultdict
 )
 
 from sqlalchemy import (
     select,
     desc
 )
+
+from datetime import (
+    datetime,
+    timedelta
+)
+
+import statistics
+import logging
 
 # ==========================================================
 # DATABASE
@@ -57,15 +51,18 @@ logger = logging.getLogger(__name__)
 
 # ==========================================================
 # ROUTER
+# IMPORTANT:
+# main.py already adds "/api"
+# FINAL URL:
+# /api/dashboard/{company_id}
 # ==========================================================
 
 router = APIRouter(
-    prefix="/dashboard",
     tags=["Dashboard"]
 )
 
 # ==========================================================
-# REQUEST MODEL
+# CHAT MODEL
 # ==========================================================
 
 class ChatRequest(BaseModel):
@@ -92,12 +89,17 @@ def safe_rating(review):
 def safe_get(review, field, default=None):
 
     try:
+
         return getattr(review, field, default)
 
     except:
         return default
 
-def calculate_sentiment(avg_rating: float):
+# ==========================================================
+# SENTIMENT
+# ==========================================================
+
+def calculate_sentiment(avg_rating):
 
     if avg_rating >= 4:
         return "Positive"
@@ -120,25 +122,41 @@ async def get_reviews_from_db(
 
         stmt = (
             select(Review)
-            .where(Review.company_id == company_id)
-            .order_by(desc(Review.google_review_time))
+            .where(
+                Review.company_id == company_id
+            )
+            .order_by(
+                desc(Review.google_review_time)
+            )
             .limit(limit)
         )
 
         result = await db.execute(stmt)
 
-        return result.scalars().all()
+        reviews = result.scalars().all()
+
+        logger.info(
+            f"✅ DB REVIEWS FOUND => {len(reviews)}"
+        )
+
+        return reviews
 
 # ==========================================================
-# DASHBOARD API
+# MAIN DASHBOARD API
+# FRONTEND URL:
+# /api/dashboard/{company_id}?days=365
 # ==========================================================
 
-@router.get("/company/{company_id}")
+@router.get("/dashboard/{company_id}")
 
 async def get_dashboard_data(
+
     request: Request,
+
     company_id: int,
+
     days: int = Query(365)
+
 ):
 
     try:
@@ -149,7 +167,7 @@ async def get_dashboard_data(
 
         reviews = await get_reviews_from_db(
             company_id=company_id,
-            limit=2000
+            limit=5000
         )
 
         logger.info(
@@ -208,7 +226,7 @@ async def get_dashboard_data(
             except Exception as e:
 
                 logger.warning(
-                    f"Date filtering failed => {e}"
+                    f"Date filter failed => {e}"
                 )
 
         reviews = filtered_reviews
@@ -239,41 +257,34 @@ async def get_dashboard_data(
 
         monthly_rating_count = defaultdict(int)
 
-        keyword_counter = Counter()
-
-        review_lengths = []
-
         recent_reviews = 0
 
         # ==================================================
-        # ANALYTICS LOOP
+        # LOOP
         # ==================================================
 
         for review in reviews:
 
             rating = safe_rating(review)
 
-            text = str(
-                safe_get(review, "text", "")
-            ).lower()
-
-            review_lengths.append(len(text))
-
             if rating > 0:
 
                 ratings.append(rating)
 
                 if rating >= 4:
+
                     positive_reviews += 1
 
                 elif rating == 3:
+
                     neutral_reviews += 1
 
                 else:
+
                     negative_reviews += 1
 
             # ==============================================
-            # DATE GROUPING
+            # MONTH GROUPING
             # ==============================================
 
             try:
@@ -298,6 +309,7 @@ async def get_dashboard_data(
                     dt = created_at
 
                 if dt.tzinfo:
+
                     dt = dt.replace(tzinfo=None)
 
                 month_key = dt.strftime("%Y-%m")
@@ -316,14 +328,16 @@ async def get_dashboard_data(
 
                 monthly_rating_count[month_key] += 1
 
-                if dt >= (now - timedelta(days=30)):
+                if dt >= (
+                    now - timedelta(days=30)
+                ):
 
                     recent_reviews += 1
 
             except Exception as e:
 
                 logger.warning(
-                    f"Monthly analytics failed => {e}"
+                    f"Monthly grouping failed => {e}"
                 )
 
         # ==================================================
@@ -331,55 +345,48 @@ async def get_dashboard_data(
         # ==================================================
 
         average_rating = round(
+
             statistics.mean(ratings),
+
             2
+
         ) if ratings else 0
 
         reputation_score = round(
+
             (average_rating / 5) * 100,
+
             2
+
         ) if average_rating else 0
 
         customer_satisfaction = round(
-            (positive_reviews / max(1, total_reviews)) * 100,
+
+            (
+                positive_reviews
+                / max(1, total_reviews)
+            ) * 100,
+
             2
         )
 
         revenue_risk = round(
-            max(0, 100 - reputation_score),
+
+            max(
+                0,
+                100 - reputation_score
+            ),
+
             2
         )
-
-        customer_retention = round(
-            min(100, reputation_score * 0.92),
-            2
-        )
-
-        engagement_rate = round(
-            (total_reviews / 30) * 10,
-            2
-        )
-
-        growth_score = round(
-            (
-                (positive_reviews - negative_reviews)
-                / max(1, total_reviews)
-            ) * 100,
-            2
-        )
-
-        review_quality_score = round(
-            statistics.mean(review_lengths),
-            2
-        ) if review_lengths else 0
 
         business_health_score = round(
+
             (
-                reputation_score * 0.40 +
-                customer_satisfaction * 0.30 +
-                customer_retention * 0.20 +
-                max(0, growth_score) * 0.10
+                reputation_score * 0.5 +
+                customer_satisfaction * 0.5
             ),
+
             2
         )
 
@@ -404,32 +411,13 @@ async def get_dashboard_data(
             executive_risk = "Low"
 
         # ==================================================
-        # PERFORMANCE
-        # ==================================================
-
-        if average_rating >= 4.5:
-
-            performance_level = "Enterprise Excellence"
-
-        elif average_rating >= 4:
-
-            performance_level = "High Performance"
-
-        elif average_rating >= 3:
-
-            performance_level = "Operational Stability"
-
-        else:
-
-            performance_level = "Critical Recovery"
-
-        # ==================================================
         # RATING DISTRIBUTION
         # ==================================================
 
         rating_counter = Counter(ratings)
 
         rating_distribution = [
+
             rating_counter.get(5, 0),
             rating_counter.get(4, 0),
             rating_counter.get(3, 0),
@@ -438,7 +426,7 @@ async def get_dashboard_data(
         ]
 
         # ==================================================
-        # MONTHLY DATA
+        # MONTHLY TREND
         # ==================================================
 
         sorted_months = sorted(
@@ -469,11 +457,18 @@ async def get_dashboard_data(
                 monthly_negative.get(month, 0)
             )
 
-            rating_total = monthly_rating_sum.get(month, 0)
+            rating_total = monthly_rating_sum.get(
+                month,
+                0
+            )
 
-            rating_count = monthly_rating_count.get(month, 1)
+            rating_count = monthly_rating_count.get(
+                month,
+                1
+            )
 
             monthly_average_rating.append(
+
                 round(
                     rating_total / max(1, rating_count),
                     2
@@ -481,7 +476,7 @@ async def get_dashboard_data(
             )
 
         # ==================================================
-        # AI FORECAST
+        # FORECASTING
         # ==================================================
 
         predicted_next_month_reviews = 0
@@ -509,26 +504,42 @@ async def get_dashboard_data(
         )
 
         predicted_future_rating = round(
-            min(5, average_rating + 0.3),
+
+            min(
+                5,
+                average_rating + 0.2
+            ),
+
             2
         )
 
         # ==================================================
-        # TOP KEYWORDS
+        # EXECUTIVE SUMMARY
         # ==================================================
 
-        top_keywords = []
+        executive_summary = f"""
+Business reputation currently stands at
+{reputation_score}% with an average rating
+of {average_rating}/5.
 
-        for word, count in keyword_counter.most_common(15):
+Customer satisfaction level is
+{customer_satisfaction}% while
+business health score is
+{business_health_score}%.
 
-            top_keywords.append({
+AI analysis categorizes the current
+executive risk as {executive_risk}.
 
-                "keyword": word,
-                "count": count
-            })
+Projected future rating is
+{predicted_future_rating}/5 with expected
+future review volume of
+{predicted_next_month_reviews} reviews.
+"""
 
         # ==================================================
         # RESPONSE
+        # IMPORTANT:
+        # EXACTLY MATCHES FRONTEND
         # ==================================================
 
         return {
@@ -537,40 +548,25 @@ async def get_dashboard_data(
 
             "company_id": company_id,
 
-            "last_updated":
-                datetime.utcnow().isoformat(),
-
             "kpis": {
 
-                "total_reviews": total_reviews,
+                "total_reviews":
+                    total_reviews,
 
-                "average_rating": average_rating,
+                "average_rating":
+                    average_rating,
 
-                "reputation_score": reputation_score,
+                "reputation_score":
+                    reputation_score,
 
                 "customer_satisfaction":
                     customer_satisfaction,
-
-                "customer_retention":
-                    customer_retention,
-
-                "engagement_rate":
-                    engagement_rate,
-
-                "growth_score":
-                    growth_score,
 
                 "revenue_risk":
                     revenue_risk,
 
                 "business_health_score":
                     business_health_score,
-
-                "review_quality_score":
-                    review_quality_score,
-
-                "recent_reviews":
-                    recent_reviews
             },
 
             "review_breakdown": {
@@ -583,11 +579,6 @@ async def get_dashboard_data(
 
                 "negative_reviews":
                     negative_reviews,
-
-                "customer_sentiment":
-                    calculate_sentiment(
-                        average_rating
-                    )
             },
 
             "charts": {
@@ -595,6 +586,7 @@ async def get_dashboard_data(
                 "rating_distribution": {
 
                     "labels": [
+
                         "5 Star",
                         "4 Star",
                         "3 Star",
@@ -642,24 +634,21 @@ async def get_dashboard_data(
                 "risk_level":
                     executive_risk,
 
-                "performance":
-                    performance_level,
-
-                "business_health_score":
-                    business_health_score,
+                "executive_summary":
+                    executive_summary,
 
                 "predicted_next_month_reviews":
                     predicted_next_month_reviews,
 
                 "predicted_future_rating":
-                    predicted_future_rating
+                    predicted_future_rating,
             }
         }
 
     except Exception as e:
 
         logger.exception(
-            "Dashboard API failed"
+            "❌ DASHBOARD FAILED"
         )
 
         raise HTTPException(
@@ -668,15 +657,23 @@ async def get_dashboard_data(
         )
 
 # ==========================================================
-# COMPANY REVIEWS API
+# REVIEWS API
+# FRONTEND URL:
+# /api/reviews/company/{company_id}
 # ==========================================================
 
 @router.get("/reviews/company/{company_id}")
 
 async def get_company_reviews(
+
     request: Request,
+
     company_id: int,
-    limit: int = Query(100, le=2000)
+
+    limit: int = Query(
+        100,
+        le=5000
+    )
 ):
 
     try:
@@ -712,7 +709,9 @@ async def get_company_reviews(
                 "rating":
                     rating,
 
-                "review_text":
+                # IMPORTANT:
+                # FRONTEND EXPECTS "content"
+                "content":
                     safe_get(
                         review,
                         "text",
@@ -721,18 +720,20 @@ async def get_company_reviews(
 
                 "created_at":
 
-                    safe_get(
-                        review,
-                        "google_review_time",
-                        None
-                    )
+                    str(
 
-                    or
+                        safe_get(
+                            review,
+                            "google_review_time"
+                        )
 
-                    safe_get(
-                        review,
-                        "created_at",
-                        "-"
+                        or
+
+                        safe_get(
+                            review,
+                            "created_at",
+                            "-"
+                        )
                     ),
 
                 "sentiment":
@@ -753,7 +754,7 @@ async def get_company_reviews(
     except Exception as e:
 
         logger.exception(
-            "Reviews API failed"
+            "❌ REVIEWS API FAILED"
         )
 
         raise HTTPException(
