@@ -1,7 +1,7 @@
 # ==========================================================
 # FILE: app/routes/dashboard.py
-# REVIEW INTEL AI — ENTERPRISE EXECUTIVE DASHBOARD
-# FULLY ALIGNED WITH dashboard.html
+# REVIEW INTEL AI — ENTERPRISE AI DASHBOARD
+# FULLY FRONTEND ALIGNED VERSION
 # ==========================================================
 
 from fastapi import (
@@ -11,22 +11,22 @@ from fastapi import (
     Request
 )
 
-from collections import (
-    defaultdict,
-    Counter
-)
-
 from sqlalchemy import (
     select,
     desc
 )
 
+from collections import (
+    defaultdict,
+    Counter
+)
+
+from statistics import mean
+
 from datetime import (
     datetime,
     timedelta
 )
-
-from statistics import mean
 
 import logging
 
@@ -63,11 +63,9 @@ router = APIRouter(
 def safe_get(obj, field, default=None):
 
     try:
-
         return getattr(obj, field, default)
 
     except:
-
         return default
 
 
@@ -75,7 +73,11 @@ def safe_rating(review):
 
     try:
 
-        rating = safe_get(review, "rating", 0)
+        rating = safe_get(
+            review,
+            "rating",
+            0
+        )
 
         if rating is None:
             return 0
@@ -92,20 +94,26 @@ def safe_rating(review):
 # ==========================================================
 
 async def get_reviews_from_db(
+
     company_id: int,
     limit: int = 5000
+
 ):
 
     async with AsyncSessionLocal() as db:
 
         stmt = (
+
             select(Review)
+
             .where(
                 Review.company_id == company_id
             )
+
             .order_by(
                 desc(Review.google_review_time)
             )
+
             .limit(limit)
         )
 
@@ -121,7 +129,7 @@ async def get_reviews_from_db(
 
 
 # ==========================================================
-# MAIN DASHBOARD API
+# DASHBOARD API
 # ==========================================================
 
 @router.get("/dashboard/{company_id}")
@@ -143,7 +151,9 @@ async def get_dashboard_data(
         # ==================================================
 
         reviews = await get_reviews_from_db(
+
             company_id=company_id,
+
             limit=5000
         )
 
@@ -159,7 +169,11 @@ async def get_dashboard_data(
 
         if days >= 3650:
 
-            start_date = datetime(2000, 1, 1)
+            start_date = datetime(
+                2000,
+                1,
+                1
+            )
 
         else:
 
@@ -192,6 +206,7 @@ async def get_dashboard_data(
                 if isinstance(created_at, str):
 
                     review_date = datetime.fromisoformat(
+
                         created_at.replace(
                             "Z",
                             "+00:00"
@@ -259,17 +274,18 @@ async def get_dashboard_data(
             if rating > 0:
 
                 ratings.append(rating)
-if rating >= 4:
 
-    positive_reviews += 1
+                if rating >= 4:
 
-elif rating == 3:
+                    positive_reviews += 1
 
-    neutral_reviews += 1
+                elif rating == 3:
 
-elif rating <= 2:
+                    neutral_reviews += 1
 
-    negative_reviews += 1
+                elif rating <= 2:
+
+                    negative_reviews += 1
 
             try:
 
@@ -294,6 +310,7 @@ elif rating <= 2:
                 if isinstance(created_at, str):
 
                     dt = datetime.fromisoformat(
+
                         created_at.replace(
                             "Z",
                             "+00:00"
@@ -310,35 +327,40 @@ elif rating <= 2:
                         tzinfo=None
                     )
 
-if dt.year >= 2020:
+                # ==========================================
+                # IGNORE BROKEN OLD DATES
+                # ==========================================
 
-    month_key = dt.strftime(
-        "%Y-%m"
-    )
+                if dt.year < 2020:
+                    continue
 
-    monthly_reviews[
-        month_key
-    ] += 1
+                month_key = dt.strftime(
+                    "%Y-%m"
+                )
 
-    if rating >= 4:
+                monthly_reviews[
+                    month_key
+                ] += 1
 
-        monthly_positive[
-            month_key
-        ] += 1
+                if rating >= 4:
 
-    elif rating <= 2:
+                    monthly_positive[
+                        month_key
+                    ] += 1
 
-        monthly_negative[
-            month_key
-        ] += 1
+                elif rating <= 2:
 
-    monthly_rating_sum[
-        month_key
-    ] += rating
+                    monthly_negative[
+                        month_key
+                    ] += 1
 
-    monthly_rating_count[
-        month_key
-    ] += 1
+                monthly_rating_sum[
+                    month_key
+                ] += rating
+
+                monthly_rating_count[
+                    month_key
+                ] += 1
 
             except Exception as e:
 
@@ -516,6 +538,7 @@ if dt.year >= 2020:
         # ==================================================
 
         executive_summary = f"""
+
         <div class="alert alert-primary rounded-4 shadow-sm">
 
             <h4>
@@ -530,7 +553,7 @@ if dt.year >= 2020:
                 <strong>{average_rating}</strong>
                 from
                 <strong>{total_reviews}</strong>
-                reviews.
+                customer reviews.
             </p>
 
             <p>
@@ -568,33 +591,27 @@ if dt.year >= 2020:
             <ul>
 
                 <li>
-                    Improve customer complaint
-                    response time
+                    Improve customer complaint response time
                 </li>
 
                 <li>
-                    Enhance operational quality
-                    monitoring
+                    Enhance operational quality monitoring
                 </li>
 
                 <li>
-                    Launch reputation recovery
-                    campaigns
+                    Launch reputation recovery campaigns
                 </li>
 
                 <li>
-                    Improve staff behavior
-                    management
+                    Improve staff behavior management
                 </li>
 
                 <li>
-                    Monitor monthly sentiment
-                    changes
+                    Monitor monthly sentiment changes
                 </li>
 
                 <li>
-                    Strengthen customer
-                    experience programs
+                    Strengthen customer experience programs
                 </li>
 
             </ul>
@@ -603,19 +620,16 @@ if dt.year >= 2020:
         """
 
         # ==================================================
-        # RESPONSE
+        # FINAL RESPONSE
         # ==================================================
 
         return {
 
             "status": "success",
 
-            "company_id":
-                company_id,
-
-            # ==================================================
+            # ==============================================
             # KPI CARDS
-            # ==================================================
+            # ==============================================
 
             "kpis": {
 
@@ -625,23 +639,14 @@ if dt.year >= 2020:
                 "average_rating":
                     average_rating,
 
-                "negative_reviews":
-                    negative_reviews,
-
-                "positive_reviews":
-                    positive_reviews,
-
-                "neutral_reviews":
-                    neutral_reviews,
-
                 "reputation_score":
                     reputation_score,
 
-                "customer_satisfaction":
-                    customer_satisfaction,
-
                 "revenue_risk":
                     revenue_risk,
+
+                "customer_satisfaction":
+                    customer_satisfaction,
 
                 "business_health_score":
                     business_health_score,
@@ -656,35 +661,29 @@ if dt.year >= 2020:
                     forecast_reviews
             },
 
-            # ==================================================
-            # EXECUTIVE SUMMARY
-            # ==================================================
+            # ==============================================
+            # REVIEW BREAKDOWN
+            # ==============================================
 
-            "executive_summary":
-                executive_summary,
+            "review_breakdown": {
 
-            # ==================================================
+                "positive_reviews":
+                    positive_reviews,
+
+                "neutral_reviews":
+                    neutral_reviews,
+
+                "negative_reviews":
+                    negative_reviews
+            },
+
+            # ==============================================
             # CHARTS
-            # ==================================================
+            # ==============================================
 
             "charts": {
 
-                "rating_distribution": {
-
-                    "labels": [
-
-                        "5 Star",
-                        "4 Star",
-                        "3 Star",
-                        "2 Star",
-                        "1 Star"
-                    ],
-
-                    "values":
-                        rating_distribution
-                },
-
-                "monthly_reviews": {
+                "monthly_trend": {
 
                     "labels":
                         month_labels,
@@ -712,12 +711,34 @@ if dt.year >= 2020:
 
                     "values":
                         monthly_average_rating
+                },
+
+                "rating_distribution": {
+
+                    "labels": [
+
+                        "5 Star",
+                        "4 Star",
+                        "3 Star",
+                        "2 Star",
+                        "1 Star"
+                    ],
+
+                    "values":
+                        rating_distribution
                 }
             },
 
-            # ==================================================
+            # ==============================================
+            # EXECUTIVE SUMMARY
+            # ==============================================
+
+            "executive_summary":
+                executive_summary,
+
+            # ==============================================
             # RECENT REVIEWS
-            # ==================================================
+            # ==============================================
 
             "recent_reviews": [
 
@@ -733,7 +754,7 @@ if dt.year >= 2020:
                     "rating":
                         safe_rating(review),
 
-                    "text":
+                    "content":
                         safe_get(
                             review,
                             "text",
@@ -798,7 +819,9 @@ async def get_company_reviews(
     try:
 
         reviews = await get_reviews_from_db(
+
             company_id=company_id,
+
             limit=limit
         )
 
