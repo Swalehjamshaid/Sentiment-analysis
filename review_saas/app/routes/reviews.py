@@ -1,42 +1,58 @@
 # ==========================================================
-# FILE: app/services/scraper.py
-# FINAL ALIGNED HYBRID SCRAPER
-# 100% COMPATIBLE WITH reviews.py
+# FILE: app/routes/reviews.py
+# REVIEW INTEL AI — ENTERPRISE REVIEWS ENGINE
+# FULLY DATABASE + DASHBOARD ALIGNED
 # MAY 2026
 # ==========================================================
 
-import os
-import re
-import gc
-import time
-import random
-import asyncio
-import hashlib
-import logging
-import traceback
-import requests
+from fastapi import (
+    APIRouter,
+    HTTPException,
+    Query,
+    Request
+)
+
+from sqlalchemy import (
+    select,
+    desc
+)
+
+from sqlalchemy.exc import (
+    SQLAlchemyError
+)
 
 from datetime import (
     datetime,
     timedelta
 )
 
-from fake_useragent import UserAgent
+import logging
+import traceback
+import asyncio
 
-from bs4 import BeautifulSoup
+# ==========================================================
+# DATABASE
+# ==========================================================
 
-from tenacity import (
-    retry,
-    stop_after_attempt,
-    wait_exponential
+from app.core.db import AsyncSessionLocal
+
+# ==========================================================
+# MODELS
+# ==========================================================
+
+from app.core.models import (
+
+    Review,
+
+    Company
 )
 
-from playwright.async_api import (
-    async_playwright
-)
+# ==========================================================
+# SCRAPER
+# ==========================================================
 
-from playwright_stealth import (
-    stealth_async
+from app.services.scraper import (
+    scrape_google_reviews
 )
 
 # ==========================================================
@@ -44,936 +60,635 @@ from playwright_stealth import (
 # ==========================================================
 
 logger = logging.getLogger(
-    "app.services.scraper"
+    "app.routes.reviews"
 )
 
 # ==========================================================
-# ENV VARIABLES
+# ROUTER
 # ==========================================================
 
-SERPAPI_API_KEY = os.getenv(
-    "SERPAPI_API_KEY"
-)
-
-PROXY_SERVER = os.getenv(
-    "PROXY_SERVER"
-)
-
-PROXY_USERNAME = os.getenv(
-    "PROXY_USERNAME"
-)
-
-PROXY_PASSWORD = os.getenv(
-    "PROXY_PASSWORD"
+router = APIRouter(
+    prefix="/api",
+    tags=["Reviews"]
 )
 
 # ==========================================================
-# CONFIG
+# SAFE HELPERS
 # ==========================================================
 
-REQUEST_TIMEOUT = 120
-
-PLAYWRIGHT_TIMEOUT = 60000
-
-HEADLESS = True
-
-MAX_SCROLLS = 6
-
-# ==========================================================
-# CLEAN TEXT
-# ==========================================================
-
-def clean_text(text):
-
-    if not text:
-        return ""
-
-    text = str(text)
-
-    text = text.replace("\n", " ")
-    text = text.replace("\r", " ")
-    text = text.replace("\t", " ")
-
-    text = " ".join(text.split())
-
-    return text[:5000]
-
-# ==========================================================
-# HASH REVIEW
-# ==========================================================
-
-def generate_hash(author, text):
-
-    raw = f"{author}_{text}"
-
-    return hashlib.md5(
-        raw.encode("utf-8")
-    ).hexdigest()
-
-# ==========================================================
-# DATE FILTER
-# ==========================================================
-
-def passes_date_filter(
-    review_date,
-    start_date=None
-):
+def safe_text(value):
 
     try:
 
-        if not start_date:
-            return True
+        if value is None:
+            return ""
 
-        lower_date = review_date.lower()
+        return str(value).strip()
+
+    except:
+        return ""
+
+
+def safe_rating(value):
+
+    try:
+
+        if value is None:
+            return 0
+
+        return float(value)
+
+    except:
+        return 0
+
+
+# ==========================================================
+# FORMAT REVIEW DATE
+# ==========================================================
+
+def normalize_review_date(review_date):
+
+    try:
+
+        if not review_date:
+            return datetime.utcnow()
+
+        lower = review_date.lower()
 
         now = datetime.utcnow()
 
-        if "day" in lower_date:
+        if "day" in lower:
 
             num = int(
-                re.search(
-                    r"\d+",
-                    lower_date
-                ).group()
+                "".join(
+                    filter(str.isdigit, lower)
+                ) or 0
             )
 
-            actual_date = (
-                now - timedelta(days=num)
-            )
+            return now - timedelta(days=num)
 
-        elif "week" in lower_date:
+        elif "week" in lower:
 
             num = int(
-                re.search(
-                    r"\d+",
-                    lower_date
-                ).group()
+                "".join(
+                    filter(str.isdigit, lower)
+                ) or 0
             )
 
-            actual_date = (
-                now - timedelta(days=num * 7)
-            )
+            return now - timedelta(days=num * 7)
 
-        elif "month" in lower_date:
+        elif "month" in lower:
 
             num = int(
-                re.search(
-                    r"\d+",
-                    lower_date
-                ).group()
+                "".join(
+                    filter(str.isdigit, lower)
+                ) or 0
             )
 
-            actual_date = (
-                now - timedelta(days=num * 30)
-            )
+            return now - timedelta(days=num * 30)
 
-        elif "year" in lower_date:
+        elif "year" in lower:
 
             num = int(
-                re.search(
-                    r"\d+",
-                    lower_date
-                ).group()
+                "".join(
+                    filter(str.isdigit, lower)
+                ) or 0
             )
 
-            actual_date = (
-                now - timedelta(days=num * 365)
-            )
+            return now - timedelta(days=num * 365)
 
-        else:
-
-            actual_date = now
-
-        return actual_date >= start_date
+        return now
 
     except:
-        return True
+
+        return datetime.utcnow()
 
 # ==========================================================
-# PROXY ROTATION
+# SAVE REVIEWS
 # ==========================================================
 
-def get_proxy():
+async def save_reviews_to_database(
 
-    try:
-
-        session_id = random.randint(
-            100000,
-            999999
-        )
-
-        username = (
-            f"{PROXY_USERNAME}-session-{session_id}"
-        )
-
-        return {
-
-            "server":
-                f"http://{PROXY_SERVER}",
-
-            "username":
-                username,
-
-            "password":
-                PROXY_PASSWORD
-        }
-
-    except:
-        return None
-
-# ==========================================================
-# REQUESTS PROXY
-# ==========================================================
-
-def get_requests_proxy():
-
-    try:
-
-        session_id = random.randint(
-            100000,
-            999999
-        )
-
-        username = (
-            f"{PROXY_USERNAME}-session-{session_id}"
-        )
-
-        proxy_url = (
-            f"http://{username}:{PROXY_PASSWORD}@{PROXY_SERVER}"
-        )
-
-        return {
-
-            "http": proxy_url,
-
-            "https": proxy_url
-        }
-
-    except:
-        return None
-
-# ==========================================================
-# HUMAN BEHAVIOR
-# ==========================================================
-
-async def human_behavior(page):
-
-    try:
-
-        for _ in range(random.randint(1, 3)):
-
-            x = random.randint(100, 1200)
-
-            y = random.randint(100, 800)
-
-            await page.mouse.move(x, y)
-
-            await asyncio.sleep(
-                random.uniform(0.3, 1)
-            )
-
-    except:
-        pass
-
-# ==========================================================
-# GOOGLE BLOCK DETECTION
-# ==========================================================
-
-async def detect_google_block(page):
-
-    try:
-
-        content = (
-            await page.content()
-        ).lower()
-
-        block_keywords = [
-
-            "captcha",
-
-            "unusual traffic",
-
-            "automated queries",
-
-            "/sorry/",
-
-            "not a robot"
-        ]
-
-        for keyword in block_keywords:
-
-            if keyword in content:
-
-                logger.warning(
-                    f"⚠️ GOOGLE BLOCK => {keyword}"
-                )
-
-                return True
-
-        return False
-
-    except:
-        return False
-
-# ==========================================================
-# PLAYWRIGHT ENGINE
-# ==========================================================
-
-@retry(
-
-    stop=stop_after_attempt(3),
-
-    wait=wait_exponential(
-
-        multiplier=1,
-
-        min=2,
-
-        max=8
-    ),
-
-    reraise=True
-)
-
-async def scrape_with_playwright(
-
-    place_id,
-
-    existing_ids=None,
-
-    target_limit=40,
-
-    start_date=None
+    company_id,
+    reviews
 ):
 
-    reviews = []
+    inserted = 0
 
-    existing_ids = existing_ids or set()
+    skipped = 0
 
-    browser = None
-
-    try:
-
-        proxy = get_proxy()
-
-        async with async_playwright() as p:
-
-            browser = await p.chromium.launch(
-
-                headless=HEADLESS,
-
-                proxy=proxy,
-
-                args=[
-
-                    "--disable-blink-features=AutomationControlled",
-
-                    "--disable-dev-shm-usage",
-
-                    "--disable-gpu",
-
-                    "--no-sandbox"
-                ]
-            )
-
-            context = await browser.new_context(
-
-                user_agent=UserAgent().random,
-
-                locale="en-US",
-
-                viewport={
-
-                    "width": random.randint(1200, 1800),
-
-                    "height": random.randint(800, 1400)
-                }
-            )
-
-            page = await context.new_page()
-
-            await stealth_async(page)
-
-            url = (
-                f"https://www.google.com/maps/place/?q=place_id:{place_id}"
-            )
-
-            logger.info(
-                "🚀 PLAYWRIGHT PAGE OPEN"
-            )
-
-            await page.goto(
-
-                url,
-
-                wait_until="domcontentloaded",
-
-                timeout=PLAYWRIGHT_TIMEOUT
-            )
-
-            if await detect_google_block(page):
-                return []
-
-            await human_behavior(page)
-
-            try:
-
-                button = page.locator(
-                    'button[jsaction*="pane.reviewChart.moreReviews"]'
-                )
-
-                if await button.count() > 0:
-
-                    await button.first.click()
-
-                    await asyncio.sleep(2)
-
-            except:
-                pass
-
-            review_feed = page.locator(
-                'div[role="feed"]'
-            )
-
-            for _ in range(MAX_SCROLLS):
-
-                try:
-
-                    await review_feed.evaluate(
-                        "(el) => el.scrollTop = el.scrollHeight"
-                    )
-
-                    await asyncio.sleep(
-                        random.uniform(0.5, 1.5)
-                    )
-
-                except:
-                    pass
-
-            cards = page.locator(
-                "div.jftiEf"
-            )
-
-            count = await cards.count()
-
-            logger.info(
-                f"📦 PLAYWRIGHT CARDS => {count}"
-            )
-
-            seen = set()
-
-            for i in range(count):
-
-                try:
-
-                    card = cards.nth(i)
-
-                    author = ""
-                    text = ""
-                    review_date = ""
-                    rating = 5
-
-                    try:
-
-                        author = clean_text(
-                            await card.locator(".d4r55").inner_text()
-                        )
-
-                    except:
-                        pass
-
-                    try:
-
-                        text = clean_text(
-                            await card.locator(".wiI7pd").inner_text()
-                        )
-
-                    except:
-                        pass
-
-                    if not text:
-                        continue
-
-                    try:
-
-                        review_date = clean_text(
-                            await card.locator(".rsqaWe").inner_text()
-                        )
-
-                    except:
-                        pass
-
-                    if not passes_date_filter(
-                        review_date,
-                        start_date
-                    ):
-                        continue
-
-                    try:
-
-                        rating_text = await card.locator(
-                            ".kvMYJc"
-                        ).get_attribute(
-                            "aria-label"
-                        )
-
-                        match = re.search(
-                            r"(\d)",
-                            str(rating_text)
-                        )
-
-                        if match:
-                            rating = int(
-                                match.group(1)
-                            )
-
-                    except:
-                        pass
-
-                    review_id = generate_hash(
-                        author,
-                        text
-                    )
-
-                    if review_id in seen:
-                        continue
-
-                    if review_id in existing_ids:
-                        continue
-
-                    seen.add(review_id)
-
-                    existing_ids.add(review_id)
-
-                    reviews.append({
-
-                        "review_id":
-                            review_id,
-
-                        "author_name":
-                            author,
-
-                        "rating":
-                            rating,
-
-                        "review_date":
-                            review_date,
-
-                        "text":
-                            text,
-
-                        "likes":
-                            0
-                    })
-
-                    if len(reviews) >= target_limit:
-                        break
-
-                except:
-                    continue
-
-            logger.info(
-                f"✅ PLAYWRIGHT REVIEWS => {len(reviews)}"
-            )
-
-            await context.close()
-
-            await browser.close()
-
-            return reviews
-
-    except Exception as e:
-
-        logger.warning(
-            f"⚠️ PLAYWRIGHT FAILED => {e}"
-        )
-
-        return []
-
-    finally:
+    async with AsyncSessionLocal() as db:
 
         try:
 
-            if browser:
-                await browser.close()
-
-        except:
-            pass
-
-# ==========================================================
-# REQUESTS + BS4 ENGINE
-# ==========================================================
-
-def scrape_with_requests(place_id):
-
-    try:
-
-        headers = {
-
-            "User-Agent":
-                UserAgent().random
-        }
-
-        response = requests.get(
-
-            f"https://www.google.com/maps/place/?q=place_id:{place_id}",
-
-            headers=headers,
-
-            proxies=get_requests_proxy(),
-
-            timeout=60
-        )
-
-        soup = BeautifulSoup(
-            response.text,
-            "lxml"
-        )
-
-        logger.info(
-            "✅ REQUESTS ENGINE SUCCESS"
-        )
-
-        return clean_text(
-            soup.get_text()
-        )
-
-    except Exception as e:
-
-        logger.warning(
-            f"⚠️ REQUESTS ENGINE FAILED => {e}"
-        )
-
-        return ""
-
-# ==========================================================
-# SERPAPI FALLBACK ENGINE
-# ==========================================================
-
-def serpapi_true_next_reviews(
-
-    place_id,
-
-    existing_ids=None,
-
-    target_limit=100,
-
-    start_date=None
-):
-
-    logger.info(
-        "🚀 SERPAPI FALLBACK STARTED"
-    )
-
-    reviews = []
-
-    seen = set()
-
-    existing_ids = existing_ids or set()
-
-    try:
-
-        next_page_token = None
-
-        true_new_reviews = 0
-
-        while true_new_reviews < target_limit:
-
-            params = {
-
-                "engine":
-                    "google_maps_reviews",
-
-                "place_id":
-                    place_id,
-
-                "api_key":
-                    SERPAPI_API_KEY,
-
-                "sort_by":
-                    "newestFirst",
-
-                "hl":
-                    "en"
-            }
-
-            if next_page_token:
-
-                params[
-                    "next_page_token"
-                ] = next_page_token
-
-            response = requests.get(
-
-                "https://serpapi.com/search.json",
-
-                params=params,
-
-                timeout=REQUEST_TIMEOUT
-            )
-
-            response.raise_for_status()
-
-            data = response.json()
-
-            api_reviews = data.get(
-                "reviews",
-                []
-            )
-
-            if not api_reviews:
-                break
-
-            for review in api_reviews:
+            for review in reviews:
 
                 try:
 
-                    author = clean_text(
-
+                    review_id = safe_text(
                         review.get(
-                            "user",
-                            {}
-                        ).get(
-                            "name",
-                            ""
+                            "review_id"
                         )
                     )
 
-                    text = clean_text(
-                        review.get(
-                            "snippet",
-                            ""
+                    existing_stmt = (
+
+                        select(Review)
+
+                        .where(
+                            Review.review_id == review_id
                         )
                     )
 
-                    if not text:
+                    existing_result = await db.execute(
+                        existing_stmt
+                    )
+
+                    existing = existing_result.scalar_one_or_none()
+
+                    if existing:
+
+                        skipped += 1
+
                         continue
 
-                    review_date = clean_text(
+                    review_date = normalize_review_date(
+
                         review.get(
-                            "date",
-                            ""
+                            "review_date"
                         )
                     )
 
-                    if not passes_date_filter(
-                        review_date,
-                        start_date
-                    ):
-                        continue
+                    db_review = Review(
 
-                    review_id = generate_hash(
-                        author,
-                        text
-                    )
+                        company_id=
+                            company_id,
 
-                    if review_id in seen:
-                        continue
-
-                    if review_id in existing_ids:
-                        continue
-
-                    seen.add(review_id)
-
-                    existing_ids.add(review_id)
-
-                    reviews.append({
-
-                        "review_id":
+                        review_id=
                             review_id,
 
-                        "author_name":
-                            author,
-
-                        "rating":
-                            review.get(
-                                "rating",
-                                5
+                        author_name=
+                            safe_text(
+                                review.get(
+                                    "author_name"
+                                )
                             ),
 
-                        "review_date":
+                        rating=
+                            safe_rating(
+                                review.get(
+                                    "rating"
+                                )
+                            ),
+
+                        text=
+                            safe_text(
+                                review.get(
+                                    "text"
+                                )
+                            ),
+
+                        review_likes=
+                            int(
+                                review.get(
+                                    "likes",
+                                    0
+                                )
+                            ),
+
+                        google_review_time=
                             review_date,
 
-                        "text":
-                            text,
+                        created_at=
+                            datetime.utcnow()
+                    )
 
-                        "likes":
-                            review.get(
-                                "likes",
-                                0
-                            )
-                    })
+                    db.add(
+                        db_review
+                    )
 
-                    true_new_reviews += 1
+                    inserted += 1
 
-                except:
+                except Exception as e:
+
+                    logger.warning(
+                        f"⚠️ REVIEW SAVE FAILED => {e}"
+                    )
+
                     continue
 
+            await db.commit()
+
             logger.info(
-                f"✅ SERPAPI TRUE NEW => {true_new_reviews}"
+                f"✅ INSERTED => {inserted}"
             )
 
-            if true_new_reviews >= target_limit:
-                break
-
-            next_page_token = (
-
-                data.get(
-                    "serpapi_pagination",
-                    {}
-                ).get(
-                    "next_page_token"
-                )
+            logger.info(
+                f"✅ SKIPPED => {skipped}"
             )
 
-            if not next_page_token:
-                break
+            return {
 
-            time.sleep(
-                random.uniform(1, 2)
+                "inserted":
+                    inserted,
+
+                "skipped":
+                    skipped
+            }
+
+        except Exception as e:
+
+            await db.rollback()
+
+            logger.exception(
+                "❌ DATABASE SAVE FAILED"
             )
 
-        logger.info(
-            f"✅ SERPAPI FINAL REVIEWS => {len(reviews)}"
-        )
+            raise HTTPException(
 
-        return reviews
+                status_code=500,
 
-    except Exception as e:
-
-        logger.warning(
-            f"⚠️ SERPAPI FAILED => {e}"
-        )
-
-        return []
+                detail=str(e)
+            )
 
 # ==========================================================
-# MAIN SCRAPER
+# SYNC REVIEWS
 # ==========================================================
 
-async def scrape_google_reviews(
+@router.post(
+    "/reviews/sync/{company_id}"
+)
 
-    place_id,
+async def sync_reviews(
 
-    target_limit=100,
+    request: Request,
 
-    start_date=None,
+    company_id: int,
 
-    end_date=None
-):
-
-    logger.info(
-        "🚀 HYBRID SCRAPER STARTED"
+    limit: int = Query(
+        100,
+        le=1000
     )
+):
 
     try:
 
-        existing_review_ids = set()
+        logger.info(
+            f"🚀 REVIEW SYNC STARTED => {company_id}"
+        )
 
         # ==================================================
-        # LAYER 1 — PLAYWRIGHT
+        # GET COMPANY
         # ==================================================
 
-        playwright_reviews = await scrape_with_playwright(
+        async with AsyncSessionLocal() as db:
 
-            place_id=place_id,
+            stmt = (
 
-            existing_ids=existing_review_ids,
+                select(Company)
 
-            target_limit=40,
+                .where(
+                    Company.id == company_id
+                )
+            )
 
-            start_date=start_date
+            result = await db.execute(stmt)
+
+            company = result.scalar_one_or_none()
+
+            if not company:
+
+                raise HTTPException(
+
+                    status_code=404,
+
+                    detail="Company not found"
+                )
+
+        # ==================================================
+        # SCRAPE REVIEWS
+        # ==================================================
+
+        scraped_reviews = await scrape_google_reviews(
+
+            place_id=
+                company.place_id,
+
+            target_limit=
+                limit
         )
 
         logger.info(
-            f"✅ PLAYWRIGHT COUNT => {len(playwright_reviews)}"
+            f"✅ SCRAPED REVIEWS => {len(scraped_reviews)}"
         )
 
         # ==================================================
-        # LAYER 2 — REQUESTS
+        # SAVE TO DATABASE
         # ==================================================
 
-        await asyncio.to_thread(
+        save_result = await save_reviews_to_database(
 
-            scrape_with_requests,
+            company_id=
+                company_id,
 
-            place_id
+            reviews=
+                scraped_reviews
         )
 
-        # ==================================================
-        # LAYER 3 — SERPAPI FALLBACK
-        # ==================================================
+        return {
 
-        remaining = (
-            target_limit -
-            len(playwright_reviews)
-        )
+            "status":
+                "success",
 
-        serp_reviews = []
+            "company_id":
+                company_id,
 
-        if remaining > 0:
+            "company_name":
+                company.name,
 
-            logger.info(
-                f"🚀 SERPAPI FALLBACK FETCH => {remaining}"
-            )
+            "scraped_reviews":
+                len(scraped_reviews),
 
-            serp_reviews = await asyncio.to_thread(
+            "inserted_reviews":
+                save_result["inserted"],
 
-                serpapi_true_next_reviews,
+            "skipped_reviews":
+                save_result["skipped"]
+        }
 
-                place_id,
+    except HTTPException:
 
-                existing_review_ids,
-
-                remaining,
-
-                start_date
-            )
-
-        # ==================================================
-        # FINAL MERGE
-        # ==================================================
-
-        final_reviews = []
-
-        seen = set()
-
-        for review in (
-
-            playwright_reviews +
-
-            serp_reviews
-        ):
-
-            review_id = review.get(
-                "review_id"
-            )
-
-            if review_id in seen:
-                continue
-
-            seen.add(review_id)
-
-            final_reviews.append(review)
-
-        logger.info(
-            f"✅ FINAL REVIEW COUNT => {len(final_reviews)}"
-        )
-
-        return final_reviews
+        raise
 
     except Exception as e:
 
         logger.exception(
-            f"❌ SCRAPER FAILED => {e}"
+            "❌ REVIEW SYNC FAILED"
         )
 
-        logger.error(
-            traceback.format_exc()
+        raise HTTPException(
+
+            status_code=500,
+
+            detail=str(e)
         )
 
-        return []
+# ==========================================================
+# GET COMPANY REVIEWS
+# ==========================================================
 
-    finally:
+@router.get(
+    "/reviews/company/{company_id}"
+)
 
-        gc.collect()
+async def get_company_reviews(
+
+    request: Request,
+
+    company_id: int,
+
+    limit: int = Query(
+        100,
+        le=5000
+    )
+):
+
+    try:
+
+        async with AsyncSessionLocal() as db:
+
+            stmt = (
+
+                select(Review)
+
+                .where(
+                    Review.company_id == company_id
+                )
+
+                .order_by(
+                    desc(
+                        Review.google_review_time
+                    )
+                )
+
+                .limit(limit)
+            )
+
+            result = await db.execute(
+                stmt
+            )
+
+            reviews = result.scalars().all()
+
+            logger.info(
+                f"✅ REVIEWS FETCHED => {len(reviews)}"
+            )
+
+            formatted = []
+
+            for review in reviews:
+
+                rating = safe_rating(
+                    review.rating
+                )
+
+                sentiment = (
+
+                    "positive"
+
+                    if rating >= 4
+
+                    else
+
+                    "negative"
+
+                    if rating <= 2
+
+                    else
+
+                    "neutral"
+                )
+
+                formatted.append({
+
+                    "id":
+                        review.id,
+
+                    "review_id":
+                        review.review_id,
+
+                    "author_name":
+                        safe_text(
+                            review.author_name
+                        ),
+
+                    "rating":
+                        rating,
+
+                    "text":
+                        safe_text(
+                            review.text
+                        ),
+
+                    "review_likes":
+                        review.review_likes,
+
+                    "google_review_time":
+
+                        str(
+                            review.google_review_time
+                        )
+
+                        if review.google_review_time
+                        else None,
+
+                    "created_at":
+
+                        str(
+                            review.created_at
+                        )
+
+                        if review.created_at
+                        else None,
+
+                    "sentiment":
+                        sentiment
+                })
+
+            return {
+
+                "status":
+                    "success",
+
+                "company_id":
+                    company_id,
+
+                "total_reviews":
+                    len(formatted),
+
+                "reviews":
+                    formatted
+            }
+
+    except SQLAlchemyError as e:
+
+        logger.exception(
+            "❌ DATABASE QUERY FAILED"
+        )
+
+        raise HTTPException(
+
+            status_code=500,
+
+            detail=str(e)
+        )
+
+    except Exception as e:
+
+        logger.exception(
+            "❌ REVIEWS API FAILED"
+        )
+
+        raise HTTPException(
+
+            status_code=500,
+
+            detail=str(e)
+        )
+
+# ==========================================================
+# DELETE REVIEW
+# ==========================================================
+
+@router.delete(
+    "/reviews/{review_id}"
+)
+
+async def delete_review(
+
+    request: Request,
+
+    review_id: int
+):
+
+    try:
+
+        async with AsyncSessionLocal() as db:
+
+            stmt = (
+
+                select(Review)
+
+                .where(
+                    Review.id == review_id
+                )
+            )
+
+            result = await db.execute(
+                stmt
+            )
+
+            review = result.scalar_one_or_none()
+
+            if not review:
+
+                raise HTTPException(
+
+                    status_code=404,
+
+                    detail="Review not found"
+                )
+
+            await db.delete(review)
+
+            await db.commit()
+
+            logger.info(
+                f"🗑️ REVIEW DELETED => {review_id}"
+            )
+
+            return {
+
+                "status":
+                    "success",
+
+                "message":
+                    "Review deleted successfully"
+            }
+
+    except Exception as e:
+
+        logger.exception(
+            "❌ DELETE REVIEW FAILED"
+        )
+
+        raise HTTPException(
+
+            status_code=500,
+
+            detail=str(e)
+        )
+
+# ==========================================================
+# HEALTH CHECK
+# ==========================================================
+
+@router.get(
+    "/reviews/health"
+)
+
+async def reviews_health():
+
+    return {
+
+        "status":
+            "healthy",
+
+        "service":
+            "reviews",
+
+        "timestamp":
+            str(
+                datetime.utcnow()
+            )
+    }
