@@ -1,7 +1,8 @@
 # ==========================================================
 # FILE: app/main.py
 # TRUSTLYTICS AI — WORLD-CLASS ENTERPRISE MAIN.PY
-# MAY 2026 PRODUCTION VERSION
+# FIXED VERSION — NO EXISTING ATTRIBUTES REMOVED
+# MAY 2026
 # ==========================================================
 
 from __future__ import annotations
@@ -735,6 +736,25 @@ async def companies_page(
         )
 
 # ==========================================================
+# LOGOUT
+# ==========================================================
+
+@app.get("/logout")
+
+async def logout(
+    request: Request
+):
+
+    request.session.clear()
+
+    return RedirectResponse(
+
+        url="/login",
+
+        status_code=302
+    )
+
+# ==========================================================
 # HEALTH CHECK
 # ==========================================================
 
@@ -801,24 +821,11 @@ for route_name in ROUTES:
             "router"
         )
 
-        existing_prefix = getattr(
-            router,
-            "prefix",
-            ""
-        )
+        # ==================================================
+        # FINAL FIX
+        # ==================================================
 
-        if existing_prefix.startswith("/api"):
-
-            app.include_router(router)
-
-        else:
-
-            app.include_router(
-
-                router,
-
-                prefix="/api"
-            )
+        app.include_router(router)
 
         logger.success(
             f"✅ {route_name.upper()} ROUTER REGISTERED"
