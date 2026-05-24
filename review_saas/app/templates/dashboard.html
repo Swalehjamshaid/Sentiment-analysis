@@ -1,6 +1,7 @@
 <!-- ========================================================= -->
-<!-- REVIEW INTEL AI — WORLD CLASS EXECUTIVE DASHBOARD -->
-<!-- ENTERPRISE ULTRA PREMIUM VERSION -->
+<!-- FILE: templates/dashboard.html -->
+<!-- REVIEW INTEL AI — ENTERPRISE EXECUTIVE DASHBOARD -->
+<!-- FULLY SYNCHRONIZED VERSION -->
 <!-- MAY 2026 -->
 <!-- ========================================================= -->
 
@@ -9,7 +10,7 @@
 
 <head>
 
-    <meta charset="UTF-8" />
+    <meta charset="UTF-8"/>
 
     <meta
         name="viewport"
@@ -17,11 +18,11 @@
     />
 
     <title>
-        Review Intel AI Executive Dashboard
+        Review Intel AI Dashboard
     </title>
 
     <!-- ===================================================== -->
-    <!-- FONTS -->
+    <!-- GOOGLE FONTS -->
     <!-- ===================================================== -->
 
     <link
@@ -55,42 +56,27 @@
     >
 
     <!-- ===================================================== -->
-    <!-- CHART.JS -->
+    <!-- CHARTJS -->
     <!-- ===================================================== -->
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
     <!-- ===================================================== -->
-    <!-- STYLES -->
+    <!-- STYLE -->
     <!-- ===================================================== -->
 
     <style>
 
         :root{
 
-            --primary:#4f46e5;
-            --secondary:#7c3aed;
-
+            --primary:#6366f1;
+            --secondary:#8b5cf6;
             --success:#10b981;
             --danger:#ef4444;
             --warning:#f59e0b;
-            --info:#3b82f6;
-
-            --bg:#0f172a;
-
-            --card:
-                rgba(255,255,255,0.08);
-
-            --glass:
-                rgba(255,255,255,0.12);
-
-            --border:
-                rgba(255,255,255,0.14);
-
+            --dark:#0f172a;
+            --card:#111827;
             --text:#f8fafc;
-
-            --shadow:
-                0 15px 40px rgba(0,0,0,0.3);
         }
 
         *{
@@ -113,7 +99,7 @@
                 'Inter',
                 sans-serif;
 
-            color:var(--text);
+            color:white;
 
             min-height:100vh;
 
@@ -136,8 +122,7 @@
 
         ::-webkit-scrollbar-thumb{
 
-            background:#4f46e5;
-
+            background:#6366f1;
             border-radius:20px;
         }
 
@@ -161,8 +146,29 @@
             align-items:center;
 
             z-index:999999;
+        }
 
-            backdrop-filter:blur(12px);
+        /* ================================================= */
+        /* GLASS CARD */
+        /* ================================================= */
+
+        .glass-card{
+
+            background:
+                rgba(255,255,255,0.07);
+
+            backdrop-filter:
+                blur(18px);
+
+            border:
+                1px solid rgba(255,255,255,0.08);
+
+            border-radius:28px;
+
+            padding:24px;
+
+            box-shadow:
+                0 15px 35px rgba(0,0,0,0.25);
         }
 
         /* ================================================= */
@@ -173,28 +179,27 @@
 
             margin-top:24px;
 
-            border-radius:30px;
-
             padding:28px;
+
+            border-radius:30px;
 
             background:
                 linear-gradient(
                     135deg,
-                    rgba(79,70,229,0.25),
-                    rgba(124,58,237,0.2)
+                    rgba(99,102,241,0.22),
+                    rgba(139,92,246,0.18)
                 );
 
+            backdrop-filter:
+                blur(20px);
+
             border:
-                1px solid rgba(255,255,255,0.12);
-
-            backdrop-filter:blur(20px);
-
-            box-shadow:var(--shadow);
+                1px solid rgba(255,255,255,0.08);
         }
 
         .brand-title{
 
-            font-size:38px;
+            font-size:40px;
 
             font-weight:800;
         }
@@ -203,7 +208,7 @@
 
             color:#cbd5e1;
 
-            margin-top:6px;
+            margin-top:5px;
         }
 
         /* ================================================= */
@@ -216,48 +221,23 @@
 
             border-radius:18px;
 
-            padding:14px 22px;
+            min-height:54px;
+
+            padding:14px 24px;
 
             font-weight:700;
 
             transition:0.3s ease;
-
-            min-height:54px;
         }
 
         .btn-enterprise:hover{
 
             transform:
                 translateY(-3px);
-
-            box-shadow:
-                0 15px 30px rgba(0,0,0,0.2);
         }
 
         /* ================================================= */
-        /* GLASS CARD */
-        /* ================================================= */
-
-        .glass-card{
-
-            background:
-                rgba(255,255,255,0.08);
-
-            border:
-                1px solid rgba(255,255,255,0.1);
-
-            backdrop-filter:
-                blur(18px);
-
-            border-radius:28px;
-
-            padding:26px;
-
-            box-shadow:var(--shadow);
-        }
-
-        /* ================================================= */
-        /* KPI CARDS */
+        /* KPI */
         /* ================================================= */
 
         .kpi-card{
@@ -274,19 +254,18 @@
         .kpi-card:hover{
 
             transform:
-                translateY(-8px)
-                scale(1.02);
+                translateY(-8px);
         }
 
         .kpi-title{
 
-            font-size:14px;
+            font-size:13px;
 
             font-weight:700;
 
-            letter-spacing:1px;
-
             opacity:0.9;
+
+            letter-spacing:1px;
         }
 
         .kpi-value{
@@ -302,7 +281,7 @@
 
             position:absolute;
 
-            right:20px;
+            right:18px;
 
             bottom:18px;
 
@@ -312,7 +291,7 @@
         }
 
         /* ================================================= */
-        /* COLORS */
+        /* GRADIENTS */
         /* ================================================= */
 
         .gradient-blue{
@@ -355,28 +334,8 @@
                 );
         }
 
-        .gradient-orange{
-
-            background:
-                linear-gradient(
-                    135deg,
-                    #f59e0b,
-                    #d97706
-                );
-        }
-
-        .gradient-dark{
-
-            background:
-                linear-gradient(
-                    135deg,
-                    #111827,
-                    #1f2937
-                );
-        }
-
         /* ================================================= */
-        /* FORM */
+        /* FORMS */
         /* ================================================= */
 
         .form-select,
@@ -384,9 +343,9 @@
 
             min-height:56px;
 
-            border-radius:18px;
-
             border:none;
+
+            border-radius:18px;
 
             background:
                 rgba(255,255,255,0.08);
@@ -397,11 +356,6 @@
         .form-select option{
 
             color:black;
-        }
-
-        .form-control::placeholder{
-
-            color:#cbd5e1;
         }
 
         /* ================================================= */
@@ -417,11 +371,6 @@
 
             background:
                 rgba(255,255,255,0.08);
-        }
-
-        .table tbody tr{
-
-            transition:0.25s ease;
         }
 
         .table tbody tr:hover{
@@ -442,15 +391,15 @@
 
             right:20px;
 
-            width:390px;
+            width:380px;
 
-            height:650px;
+            height:640px;
 
             background:
-                rgba(17,24,39,0.9);
+                rgba(17,24,39,0.92);
 
             backdrop-filter:
-                blur(18px);
+                blur(20px);
 
             border:
                 1px solid rgba(255,255,255,0.08);
@@ -459,14 +408,11 @@
 
             overflow:hidden;
 
-            z-index:99999;
+            z-index:9999;
 
             display:flex;
 
             flex-direction:column;
-
-            box-shadow:
-                0 20px 50px rgba(0,0,0,0.4);
         }
 
         #aiChatbotHeader{
@@ -476,13 +422,11 @@
             background:
                 linear-gradient(
                     135deg,
-                    #4f46e5,
-                    #7c3aed
+                    #6366f1,
+                    #8b5cf6
                 );
 
             font-weight:700;
-
-            font-size:18px;
         }
 
         #aiChatMessages{
@@ -498,11 +442,11 @@
 
         .chatMessage{
 
-            margin-bottom:16px;
-
             padding:14px;
 
             border-radius:16px;
+
+            margin-bottom:16px;
 
             line-height:1.7;
         }
@@ -511,7 +455,7 @@
 
             background:#2563eb;
 
-            margin-left:50px;
+            margin-left:40px;
         }
 
         .botMessage{
@@ -519,7 +463,7 @@
             background:
                 rgba(255,255,255,0.08);
 
-            margin-right:50px;
+            margin-right:40px;
         }
 
         #aiChatInputContainer{
@@ -555,17 +499,17 @@
 
             border-radius:16px;
 
-            padding:14px 20px;
-
-            background:#4f46e5;
+            background:#6366f1;
 
             color:white;
+
+            padding:14px 18px;
 
             font-weight:700;
         }
 
         /* ================================================= */
-        /* RESPONSIVE */
+        /* MOBILE */
         /* ================================================= */
 
         @media(max-width:992px){
@@ -573,10 +517,12 @@
             #aiChatbotContainer{
 
                 width:100%;
-                height:70vh;
                 right:0;
                 bottom:0;
-                border-radius:25px 25px 0 0;
+                height:70vh;
+
+                border-radius:
+                    24px 24px 0 0;
             }
         }
 
@@ -586,394 +532,174 @@
 
 <body>
 
-    <!-- ===================================================== -->
-    <!-- LOADING -->
-    <!-- ===================================================== -->
+<!-- ===================================================== -->
+<!-- LOADING -->
+<!-- ===================================================== -->
+
+<div
+    class="loading-overlay"
+    id="loadingOverlay"
+>
 
     <div
-        class="loading-overlay"
-        id="loadingOverlay"
-    >
-        <div
-            class="spinner-border text-light"
-            style="width:5rem;height:5rem"
-        ></div>
+        class="spinner-border text-light"
+        style="width:5rem;height:5rem"
+    ></div>
+
+</div>
+
+<!-- ===================================================== -->
+<!-- CONTAINER -->
+<!-- ===================================================== -->
+
+<div class="container-fluid px-4 pb-5">
+
+    <!-- ================================================= -->
+    <!-- HEADER -->
+    <!-- ================================================= -->
+
+    <div class="dashboard-header">
+
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-4">
+
+            <div>
+
+                <div class="brand-title">
+
+                    <i class="bi bi-cpu-fill"></i>
+
+                    Review Intel AI
+
+                </div>
+
+                <div class="brand-sub">
+
+                    Enterprise AI Reputation Intelligence
+
+                </div>
+
+            </div>
+
+            <div class="d-flex flex-wrap gap-3">
+
+                <button
+                    class="btn btn-light btn-enterprise"
+                    data-bs-toggle="modal"
+                    data-bs-target="#addBusinessModal"
+                >
+                    <i class="bi bi-plus-circle"></i>
+                    Add Business
+                </button>
+
+                <button
+                    class="btn btn-success btn-enterprise"
+                    id="syncBtn"
+                >
+                    <i class="bi bi-arrow-repeat"></i>
+                    Sync Reviews
+                </button>
+
+                <button
+                    class="btn btn-warning btn-enterprise"
+                    id="refreshDashboardBtn"
+                >
+                    <i class="bi bi-arrow-clockwise"></i>
+                    Refresh
+                </button>
+
+                <button
+                    class="btn btn-danger btn-enterprise"
+                    id="logoutBtn"
+                >
+                    <i class="bi bi-box-arrow-right"></i>
+                    Logout
+                </button>
+
+            </div>
+
+        </div>
+
     </div>
 
-    <!-- ===================================================== -->
-    <!-- CONTAINER -->
-    <!-- ===================================================== -->
+    <!-- ================================================= -->
+    <!-- FILTERS -->
+    <!-- ================================================= -->
 
-    <div class="container-fluid px-4 pb-5">
+    <div class="glass-card mt-4">
 
-        <!-- ================================================= -->
-        <!-- HEADER -->
-        <!-- ================================================= -->
+        <div class="row g-4">
 
-        <div class="dashboard-header">
+            <div class="col-lg-6">
 
-            <div class="d-flex flex-wrap justify-content-between align-items-center gap-4">
+                <label class="mb-2 fw-bold">
 
-                <div>
+                    Select Company
 
-                    <div class="brand-title">
-                        <i class="bi bi-cpu-fill"></i>
-                        Review Intel AI
-                    </div>
+                </label>
 
-                    <div class="brand-sub">
-                        Enterprise Reputation Intelligence Platform
-                    </div>
-
-                </div>
-
-                <div class="d-flex flex-wrap gap-3">
-
-                    <button
-                        class="btn btn-light btn-enterprise"
-                        data-bs-toggle="modal"
-                        data-bs-target="#addBusinessModal"
-                    >
-                        <i class="bi bi-plus-circle"></i>
-                        Add Business
-                    </button>
-
-                    <button
-                        class="btn btn-success btn-enterprise"
-                        id="syncBtn"
-                    >
-                        <i class="bi bi-arrow-repeat"></i>
-                        Sync Reviews
-                    </button>
-
-                    <button
-                        class="btn btn-warning btn-enterprise"
-                        id="refreshDashboardBtn"
-                    >
-                        <i class="bi bi-arrow-clockwise"></i>
-                        Refresh
-                    </button>
-
-                    <button
-                        class="btn btn-danger btn-enterprise"
-                        id="logoutBtn"
-                    >
-                        <i class="bi bi-box-arrow-right"></i>
-                        Logout
-                    </button>
-
-                </div>
-
-            </div>
-
-        </div>
-
-        <!-- ================================================= -->
-        <!-- FILTERS -->
-        <!-- ================================================= -->
-
-        <div class="glass-card mt-4">
-
-            <div class="row g-4">
-
-                <div class="col-lg-6">
-
-                    <label class="mb-2 fw-bold">
-                        Select Business
-                    </label>
-
-                    <select
-                        class="form-select"
-                        id="companySelect"
-                    >
-                        <option value="">
-                            Choose Company
-                        </option>
-                    </select>
-
-                </div>
-
-                <div class="col-lg-3">
-
-                    <label class="mb-2 fw-bold">
-                        Timeline
-                    </label>
-
-                    <select
-                        class="form-select"
-                        id="dateRange"
-                    >
-                        <option value="7">7 Days</option>
-                        <option value="30">30 Days</option>
-                        <option value="90">90 Days</option>
-                        <option value="365" selected>
-                            12 Months
-                        </option>
-                        <option value="99999">
-                            All Historical Data
-                        </option>
-                    </select>
-
-                </div>
-
-                <div class="col-lg-3">
-
-                    <label class="mb-2 fw-bold">
-                        Review Filter
-                    </label>
-
-                    <select
-                        class="form-select"
-                        id="reviewFilter"
-                    >
-                        <option value="all">
-                            All Reviews
-                        </option>
-
-                        <option value="positive">
-                            Positive Reviews
-                        </option>
-
-                        <option value="negative">
-                            Negative Reviews
-                        </option>
-                    </select>
-
-                </div>
-
-            </div>
-
-        </div>
-
-        <!-- ================================================= -->
-        <!-- KPI -->
-        <!-- ================================================= -->
-
-        <div class="row mt-4 g-4">
-
-            <div class="col-lg-3 col-md-6">
-
-                <div class="glass-card kpi-card gradient-blue">
-
-                    <div class="kpi-title">
-                        TOTAL REVIEWS
-                    </div>
-
-                    <div
-                        class="kpi-value"
-                        id="totalReviews"
-                    >
-                        0
-                    </div>
-
-                    <div class="kpi-icon">
-                        <i class="bi bi-chat-dots"></i>
-                    </div>
-
-                </div>
-
-            </div>
-
-            <div class="col-lg-3 col-md-6">
-
-                <div class="glass-card kpi-card gradient-green">
-
-                    <div class="kpi-title">
-                        AVERAGE RATING
-                    </div>
-
-                    <div
-                        class="kpi-value"
-                        id="avgRating"
-                    >
-                        0
-                    </div>
-
-                    <div class="kpi-icon">
-                        <i class="bi bi-star-fill"></i>
-                    </div>
-
-                </div>
-
-            </div>
-
-            <div class="col-lg-3 col-md-6">
-
-                <div class="glass-card kpi-card gradient-red">
-
-                    <div class="kpi-title">
-                        NEGATIVE REVIEWS
-                    </div>
-
-                    <div
-                        class="kpi-value"
-                        id="negativeReviews"
-                    >
-                        0
-                    </div>
-
-                    <div class="kpi-icon">
-                        <i class="bi bi-emoji-frown"></i>
-                    </div>
-
-                </div>
-
-            </div>
-
-            <div class="col-lg-3 col-md-6">
-
-                <div class="glass-card kpi-card gradient-purple">
-
-                    <div class="kpi-title">
-                        BUSINESS HEALTH
-                    </div>
-
-                    <div
-                        class="kpi-value"
-                        id="businessHealthScore"
-                    >
-                        0%
-                    </div>
-
-                    <div class="kpi-icon">
-                        <i class="bi bi-heart-pulse"></i>
-                    </div>
-
-                </div>
-
-            </div>
-
-        </div>
-
-        <!-- ================================================= -->
-        <!-- CHARTS -->
-        <!-- ================================================= -->
-
-        <div class="row mt-4 g-4">
-
-            <div class="col-lg-8">
-
-                <div class="glass-card">
-
-                    <h3 class="mb-4">
-                        Review Analytics
-                    </h3>
-
-                    <canvas
-                        id="reviewChart"
-                        height="120"
-                    ></canvas>
-
-                </div>
-
-            </div>
-
-            <div class="col-lg-4">
-
-                <div class="glass-card">
-
-                    <h3 class="mb-4">
-                        Rating Distribution
-                    </h3>
-
-                    <canvas
-                        id="ratingChart"
-                    ></canvas>
-
-                </div>
-
-            </div>
-
-        </div>
-
-        <!-- ================================================= -->
-        <!-- AI EXECUTIVE -->
-        <!-- ================================================= -->
-
-        <div class="glass-card mt-4">
-
-            <div class="d-flex justify-content-between align-items-center mb-4">
-
-                <h3>
-                    <i class="bi bi-cpu"></i>
-                    AI Executive Intelligence
-                </h3>
-
-                <span class="badge bg-success px-3 py-2">
-                    LIVE AI ANALYSIS
-                </span>
-
-            </div>
-
-            <div
-                id="executiveSummary"
-                style="
-                    line-height:2;
-                    color:#e2e8f0;
-                    font-size:16px;
-                "
-            >
-                AI executive analysis loading...
-            </div>
-
-        </div>
-
-        <!-- ================================================= -->
-        <!-- REVIEWS -->
-        <!-- ================================================= -->
-
-        <div class="glass-card mt-4">
-
-            <div class="d-flex justify-content-between align-items-center mb-4">
-
-                <h3>
-                    Recent Reviews
-                </h3>
-
-                <input
-                    type="text"
-                    class="form-control"
-                    placeholder="Search reviews..."
-                    style="max-width:320px"
-                    id="reviewSearch"
+                <select
+                    class="form-select"
+                    id="companySelect"
                 >
 
+                    <option value="">
+                        Choose Company
+                    </option>
+
+                </select>
+
             </div>
 
-            <div class="table-responsive">
+            <div class="col-lg-3">
 
-                <table class="table align-middle">
+                <label class="mb-2 fw-bold">
+                    Timeline
+                </label>
 
-                    <thead>
+                <select
+                    class="form-select"
+                    id="dateRange"
+                >
 
-                        <tr>
+                    <option value="7">7 Days</option>
+                    <option value="30">30 Days</option>
+                    <option value="90">90 Days</option>
+                    <option value="365" selected>
+                        12 Months
+                    </option>
 
-                            <th>Reviewer</th>
-                            <th>Rating</th>
-                            <th>Review</th>
-                            <th>Date</th>
-                            <th>Sentiment</th>
+                    <option value="99999">
+                        All Historical Data
+                    </option>
 
-                        </tr>
+                </select>
 
-                    </thead>
+            </div>
 
-                    <tbody id="reviewsTableBody">
+            <div class="col-lg-3">
 
-                        <tr>
+                <label class="mb-2 fw-bold">
+                    Review Filter
+                </label>
 
-                            <td
-                                colspan="5"
-                                class="text-center py-5"
-                            >
-                                No reviews available
-                            </td>
+                <select
+                    class="form-select"
+                    id="reviewFilter"
+                >
 
-                        </tr>
+                    <option value="all">
+                        All Reviews
+                    </option>
 
-                    </tbody>
+                    <option value="positive">
+                        Positive Reviews
+                    </option>
 
-                </table>
+                    <option value="negative">
+                        Negative Reviews
+                    </option>
+
+                </select>
 
             </div>
 
@@ -981,123 +707,107 @@
 
     </div>
 
-    <!-- ===================================================== -->
-    <!-- CHATBOT -->
-    <!-- ===================================================== -->
+    <!-- ================================================= -->
+    <!-- KPI -->
+    <!-- ================================================= -->
 
-    <div id="aiChatbotContainer">
+    <div class="row mt-4 g-4">
 
-        <div id="aiChatbotHeader">
-            AI Business Expert
-        </div>
+        <div class="col-lg-3 col-md-6">
 
-        <div id="aiChatMessages">
+            <div class="glass-card kpi-card gradient-blue">
 
-            <div class="chatMessage botMessage">
+                <div class="kpi-title">
+                    TOTAL REVIEWS
+                </div>
 
-                Hello 👋<br><br>
+                <div
+                    class="kpi-value"
+                    id="totalReviews"
+                >
+                    0
+                </div>
 
-                I am your AI Executive Intelligence Assistant.
+                <div class="kpi-icon">
+                    <i class="bi bi-chat-dots"></i>
+                </div>
 
             </div>
 
         </div>
 
-        <div id="aiChatInputContainer">
+        <div class="col-lg-3 col-md-6">
 
-            <input
-                type="text"
-                id="aiChatInput"
-                placeholder="Ask AI about business..."
-            >
+            <div class="glass-card kpi-card gradient-green">
 
-            <button id="aiChatSendBtn">
-                Send
-            </button>
+                <div class="kpi-title">
+                    AVERAGE RATING
+                </div>
+
+                <div
+                    class="kpi-value"
+                    id="avgRating"
+                >
+                    0
+                </div>
+
+                <div class="kpi-icon">
+                    <i class="bi bi-star-fill"></i>
+                </div>
+
+            </div>
+
+        </div>
+
+        <div class="col-lg-3 col-md-6">
+
+            <div class="glass-card kpi-card gradient-red">
+
+                <div class="kpi-title">
+                    NEGATIVE REVIEWS
+                </div>
+
+                <div
+                    class="kpi-value"
+                    id="negativeReviews"
+                >
+                    0
+                </div>
+
+                <div class="kpi-icon">
+                    <i class="bi bi-emoji-frown"></i>
+                </div>
+
+            </div>
+
+        </div>
+
+        <div class="col-lg-3 col-md-6">
+
+            <div class="glass-card kpi-card gradient-purple">
+
+                <div class="kpi-title">
+                    BUSINESS HEALTH
+                </div>
+
+                <div
+                    class="kpi-value"
+                    id="businessHealthScore"
+                >
+                    0%
+                </div>
+
+                <div class="kpi-icon">
+                    <i class="bi bi-heart-pulse"></i>
+                </div>
+
+            </div>
 
         </div>
 
     </div>
 
-    <!-- ===================================================== -->
-    <!-- JS -->
-    <!-- ===================================================== -->
-
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-
-    <script>
-
-        let reviewChart;
-        let ratingChart;
-
-        function showLoading(){
-
-            document.getElementById(
-                'loadingOverlay'
-            ).style.display='flex';
-        }
-
-        function hideLoading(){
-
-            document.getElementById(
-                'loadingOverlay'
-            ).style.display='none';
-        }
-
-        async function loadCompanies(){
-
-            try{
-
-                const response =
-                    await fetch('/api/companies');
-
-                const data =
-                    await response.json();
-
-                const companies =
-                    data.companies || data;
-
-                const select =
-                    document.getElementById(
-                        'companySelect'
-                    );
-
-                select.innerHTML =
-                    `<option value="">Choose Company</option>`;
-
-                companies.forEach(company=>{
-
-                    const option =
-                        document.createElement('option');
-
-                    option.value =
-                        company.id;
-
-                    option.textContent =
-                        company.name;
-
-                    select.appendChild(option);
-                });
-
-            }catch(error){
-
-                console.error(error);
-            }
-        }
-
-        document.getElementById(
-            'logoutBtn'
-        ).onclick=function(){
-
-            window.location.href='/';
-        };
-
-        window.onload=function(){
-
-            loadCompanies();
-        };
-
-    </script>
+</div>
 
 </body>
 
