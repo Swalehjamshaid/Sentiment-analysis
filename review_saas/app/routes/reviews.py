@@ -1,25 +1,38 @@
 # ==========================================================
 # FILE: app/routes/reviews.py
-# FULLY ALIGNED WITH YOUR scraper.py
+# TRUSTLYTICS AI — ENTERPRISE REVIEW ROUTER
+# FULLY ALIGNED WITH EXISTING SYSTEM
 # ==========================================================
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
-from sqlalchemy import desc
+from __future__ import annotations
+
+import logging
+import traceback
 from datetime import datetime
+
+from fastapi import (
+    APIRouter,
+    HTTPException,
+    Depends
+)
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 # ==========================================================
 # DATABASE
 # ==========================================================
 
-from app.database import get_db
+from app.core.db import get_db
 
 # ==========================================================
 # MODELS
 # ==========================================================
 
-from app.models.company import Company
-from app.models.review import Review
+from app.core.models import (
+    Company,
+    Review
+)
 
 # ==========================================================
 # SCRAPER
@@ -28,11 +41,19 @@ from app.models.review import Review
 from app.scraper import scrape_google_reviews
 
 # ==========================================================
+# LOGGER
+# ==========================================================
+
+logger = logging.getLogger(__name__)
+
+# ==========================================================
 # ROUTER
 # ==========================================================
 
 router = APIRouter(
+
     prefix="/api/reviews",
+
     tags=["Reviews"]
 )
 
@@ -41,11 +62,16 @@ router = APIRouter(
 # ==========================================================
 
 @router.get("/health")
-async def health():
+
+async def reviews_health():
 
     return {
+
         "success": True,
-        "message": "Review routes working"
+
+        "service": "reviews",
+
+        "status": "running"
     }
 
 # ==========================================================
@@ -53,199 +79,296 @@ async def health():
 # ==========================================================
 
 @router.post("/sync/{company_id}")
+
 async def sync_reviews(
+
     company_id: int,
-    db: Session = Depends(get_db)
+
+    db: AsyncSession = Depends(get_db)
 ):
 
     try:
 
-        print("=" * 60)
-        print(f"🚀 STARTING REVIEW SYNC => {company_id}")
-        print("=" * 60)
+        logger.info(
+            f"🚀 REVIEW SYNC STARTED => {company_id}"
+        )
 
         # ==================================================
-        # GET COMPANY
+        # FIND COMPANY
         # ==================================================
 
-        company = db.query(Company).filter(
+        stmt = select(Company).where(
             Company.id == company_id
-        ).first()
+        )
+
+        result = await db.execute(stmt)
+
+        company = result.scalar_one_or_none()
 
         if not company:
 
             raise HTTPException(
+
                 status_code=404,
+
                 detail="Company not found"
             )
 
-        print(f"✅ COMPANY => {company.name}")
+        logger.info(
+            f"✅ COMPANY FOUND => {company.name}"
+        )
 
         # ==================================================
-        # PLACE ID CHECK
+        # PLACE ID VALIDATION
         # ==================================================
 
-        if not company.place_id:
+        place_id = company.google_place_id
+
+        if not place_id:
 
             raise HTTPException(
+
                 status_code=400,
-                detail="Missing Google Place ID"
+
+                detail="Google Place ID missing"
             )
 
-        print(f"✅ PLACE ID => {company.place_id}")
-
-        # ==================================================
-        # EXISTING IDS
-        # ==================================================
-
-        existing_reviews = db.query(
-            Review.review_id
-        ).filter(
-            Review.company_id == company.id
-        ).all()
-
-        existing_ids = {
-            r[0]
-            for r in existing_reviews
-            if r[0]
-        }
-
-        print(f"✅ EXISTING IDS => {len(existing_ids)}")
+        logger.info(
+            f"📍 PLACE ID => {place_id}"
+        )
 
         # ==================================================
         # SCRAPE REVIEWS
         # ==================================================
 
-        reviews = await scrape_google_reviews(
-            place_id=company.place_id,
-            existing_ids=existing_ids,
-            target_limit=300
+        scraped_reviews = await scrape_google_reviews(
+            place_id=place_id
         )
 
-        print(f"✅ SCRAPER RETURNED => {len(reviews)}")
-
-        # ==================================================
-        # EMPTY
-        # ==================================================
-
-        if not reviews:
-
-            return {
-                "success": False,
-                "message": "No reviews found",
-                "inserted_reviews": 0,
-                "total_reviews": 0
-            }
-
-        inserted = 0
-        failed = 0
+        logger.info(
+            f"✅ SCRAPED REVIEWS => {len(scraped_reviews)}"
+        )
 
         # ==================================================
         # SAVE REVIEWS
         # ==================================================
 
-        for item in reviews:
+        added_count = 0
+        skipped_count = 0
+
+        for item in scraped_reviews:
 
             try:
 
-                review_id = str(
-                    item.get("review_id", "")
+                google_review_id = str(
+
+                    item.get("review_id")
+
+                    or
+
+                    item.get("google_review_id")
+
+                    or
+
+                    item.get("id")
+
+                    or
+
+                    ""
                 ).strip()
 
-                if not review_id:
-                    failed += 1
+                if not google_review_id:
+
+                    skipped_count += 1
                     continue
 
                 # ==========================================
                 # DUPLICATE CHECK
                 # ==========================================
 
-                existing = db.query(Review).filter(
-                    Review.review_id == review_id
-                ).first()
+                existing_stmt = select(Review).where(
 
-                if existing:
+                    Review.google_review_id
+                    == google_review_id
+                )
+
+                existing_result = await db.execute(
+                    existing_stmt
+                )
+
+                existing_review = (
+                    existing_result.scalar_one_or_none()
+                )
+
+                if existing_review:
+
+                    skipped_count += 1
                     continue
 
                 # ==========================================
-                # DATA
+                # DATE PARSING
                 # ==========================================
 
-                author = str(
-                    item.get("author", "Anonymous")
-                )[:255]
-
-                text = str(
-                    item.get("text", "")
-                ).strip()
-
-                rating = item.get("rating", 5)
+                review_time = None
 
                 try:
-                    rating = float(rating)
-                except:
-                    rating = 5.0
 
-                review_date = item.get("date", "")
+                    raw_date = item.get("review_time")
+
+                    if raw_date:
+
+                        if isinstance(raw_date, datetime):
+
+                            review_time = raw_date
+
+                        else:
+
+                            review_time = datetime.fromisoformat(
+
+                                str(raw_date)
+                                .replace("Z", "+00:00")
+                            )
+
+                except Exception:
+
+                    review_time = datetime.utcnow()
 
                 # ==========================================
                 # CREATE REVIEW
                 # ==========================================
 
                 new_review = Review(
+
                     company_id=company.id,
-                    review_id=review_id,
-                    author=author,
-                    text=text,
-                    rating=rating,
-                    review_date=review_date,
-                    source="Google"
+
+                    google_review_id=google_review_id,
+
+                    author_name=item.get(
+                        "author_name",
+                        "Anonymous"
+                    ),
+
+                    rating=int(
+                        item.get("rating", 0)
+                    ),
+
+                    text=item.get(
+                        "text",
+                        ""
+                    ),
+
+                    review_likes=int(
+                        item.get(
+                            "review_likes",
+                            0
+                        )
+                    ),
+
+                    google_review_time=review_time,
+
+                    sentiment_score=float(
+                        item.get(
+                            "sentiment_score",
+                            0
+                        )
+                    ),
+
+                    issue_category=item.get(
+                        "issue_category"
+                    ),
+
+                    emotion=item.get(
+                        "emotion"
+                    ),
+
+                    urgency_score=float(
+                        item.get(
+                            "urgency_score",
+                            0
+                        )
+                    ),
+
+                    ai_summary=item.get(
+                        "ai_summary"
+                    ),
+
+                    risk_score=float(
+                        item.get(
+                            "risk_score",
+                            0
+                        )
+                    ),
+
+                    topic_cluster=item.get(
+                        "topic_cluster"
+                    ),
                 )
 
                 db.add(new_review)
 
-                inserted += 1
+                added_count += 1
 
-            except Exception as insert_error:
+            except Exception as e:
 
-                print(
-                    f"❌ INSERT ERROR => {insert_error}"
+                logger.error(
+                    f"❌ REVIEW SAVE FAILED => {e}"
                 )
 
-                failed += 1
+                logger.error(
+                    traceback.format_exc()
+                )
 
         # ==================================================
         # COMMIT
         # ==================================================
 
-        db.commit()
+        await db.commit()
 
-        print("=" * 60)
-        print(f"✅ INSERTED => {inserted}")
-        print(f"❌ FAILED => {failed}")
-        print("=" * 60)
+        logger.info(
+            f"✅ REVIEWS ADDED => {added_count}"
+        )
+
+        logger.info(
+            f"⚠️ REVIEWS SKIPPED => {skipped_count}"
+        )
+
+        # ==================================================
+        # RESPONSE
+        # ==================================================
 
         return {
+
             "success": True,
-            "message": "Reviews synced successfully",
-            "inserted_reviews": inserted,
-            "failed_reviews": failed,
-            "total_reviews": len(reviews)
+
+            "company_id": company_id,
+
+            "company_name": company.name,
+
+            "reviews_collected": added_count,
+
+            "reviews_skipped": skipped_count,
+
+            "total_scraped": len(scraped_reviews)
         }
 
     except HTTPException:
+
         raise
 
     except Exception as e:
 
-        db.rollback()
+        logger.error(
+            f"❌ REVIEW SYNC FAILED => {e}"
+        )
 
-        print("=" * 60)
-        print(f"❌ REVIEW SYNC ERROR => {e}")
-        print("=" * 60)
+        logger.error(
+            traceback.format_exc()
+        )
 
         raise HTTPException(
+
             status_code=500,
+
             detail=str(e)
         )
 
@@ -254,56 +377,90 @@ async def sync_reviews(
 # ==========================================================
 
 @router.get("/company/{company_id}")
+
 async def get_company_reviews(
+
     company_id: int,
-    db: Session = Depends(get_db)
+
+    limit: int = 100,
+
+    db: AsyncSession = Depends(get_db)
 ):
 
     try:
 
-        reviews = db.query(Review).filter(
-            Review.company_id == company_id
-        ).order_by(
-            desc(Review.id)
-        ).all()
+        stmt = (
 
-        return reviews
+            select(Review)
 
-    except Exception as e:
+            .where(
+                Review.company_id == company_id
+            )
 
-        raise HTTPException(
-            status_code=500,
-            detail=str(e)
+            .order_by(
+                Review.google_review_time.desc()
+            )
+
+            .limit(limit)
         )
 
-# ==========================================================
-# DELETE REVIEWS
-# ==========================================================
+        result = await db.execute(stmt)
 
-@router.delete("/company/{company_id}")
-async def delete_company_reviews(
-    company_id: int,
-    db: Session = Depends(get_db)
-):
+        reviews = result.scalars().all()
 
-    try:
+        formatted = []
 
-        deleted = db.query(Review).filter(
-            Review.company_id == company_id
-        ).delete()
+        for review in reviews:
 
-        db.commit()
+            formatted.append({
+
+                "id": review.id,
+
+                "author": review.author_name,
+
+                "rating": review.rating,
+
+                "content": review.text,
+
+                "created_at": str(
+                    review.google_review_time
+                ),
+
+                "sentiment":
+
+                    "positive"
+
+                    if (review.rating or 0) >= 4
+
+                    else
+
+                    "negative"
+
+                    if (review.rating or 0) <= 2
+
+                    else
+
+                    "neutral"
+            })
 
         return {
+
             "success": True,
-            "deleted_reviews": deleted
+
+            "total_reviews": len(formatted),
+
+            "reviews": formatted
         }
 
     except Exception as e:
 
-        db.rollback()
+        logger.error(
+            f"❌ GET REVIEWS FAILED => {e}"
+        )
 
         raise HTTPException(
+
             status_code=500,
+
             detail=str(e)
         )
