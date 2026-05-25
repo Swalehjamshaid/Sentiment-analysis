@@ -1,26 +1,7 @@
 # ==========================================================
 # FILE: app/services/scraper.py
-# TRUSTLYTICS AI — ULTRA ENTERPRISE SCRAPER
-# MAY 2026 — FINAL PRODUCTION VERSION
-#
-# FULLY SYNCHRONIZED WITH:
-# ✅ reviews.py
-# ✅ dashboard.py
-# ✅ PostgreSQL
-# ✅ Railway
-# ✅ SERPAPI
-# ✅ Playwright
-# ✅ Proxy Rotation
-# ✅ Incremental Sync
-# ✅ Duplicate Protection
-# ✅ Legacy Compatibility
-# ✅ Frontend Compatibility
-#
-# SUPPORTS:
-# ✅ Old Routes
-# ✅ New Routes
-# ✅ Old Function Calls
-# ✅ New Function Calls
+# TRUSTLYTICS AI — ENTERPRISE GOOGLE REVIEWS SCRAPER
+# FINAL PRODUCTION SAFE VERSION
 # ==========================================================
 
 import os
@@ -28,54 +9,36 @@ import re
 import gc
 import time
 import json
+import random
 import asyncio
 import hashlib
 import logging
 
-from datetime import (
-    datetime,
-    timedelta
-)
+from datetime import datetime, timedelta
 
-# ==========================================================
-# DATABASE
-# ==========================================================
+import httpx
+
+from playwright.async_api import async_playwright
+from playwright_stealth import stealth_async
+
+from fake_useragent import UserAgent
+
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_random_exponential
+)
 
 from sqlalchemy import select
 
 from app.core.db import AsyncSessionLocal
-
 from app.core.models import Review
 
-# ==========================================================
-# OPTIONAL IMPORTS
-# ==========================================================
-
+# OPTIONAL
 try:
-    import httpx
+    from curl_cffi import requests as curl_requests
 except:
-    httpx = None
-
-try:
-    from playwright.async_api import (
-        async_playwright
-    )
-except:
-    async_playwright = None
-
-try:
-    from playwright_stealth import (
-        stealth_async
-    )
-except:
-    stealth_async = None
-
-try:
-    from fake_useragent import (
-        UserAgent
-    )
-except:
-    UserAgent = None
+    curl_requests = None
 
 # ==========================================================
 # LOGGER
@@ -89,32 +52,20 @@ logger = logging.getLogger(
 # ENV VARIABLES
 # ==========================================================
 
-SERPAPI_KEY = os.getenv(
-    "SERPAPI_KEY"
-)
+SERPAPI_KEY = os.getenv("SERPAPI_KEY")
+APIFY_TOKEN = os.getenv("APIFY_TOKEN")
 
-PROXY_SERVER = os.getenv(
-    "PROXY_SERVER"
-)
-
-PROXY_USERNAME = os.getenv(
-    "PROXY_USERNAME"
-)
-
-PROXY_PASSWORD = os.getenv(
-    "PROXY_PASSWORD"
-)
+PROXY_SERVER = os.getenv("PROXY_SERVER")
+PROXY_USERNAME = os.getenv("PROXY_USERNAME")
+PROXY_PASSWORD = os.getenv("PROXY_PASSWORD")
 
 # ==========================================================
 # CONFIG
 # ==========================================================
 
 REQUEST_TIMEOUT = 120
-
 PLAYWRIGHT_TIMEOUT = 70000
-
 HEADLESS = True
-
 MAX_SCROLLS = 25
 
 # ==========================================================
@@ -130,24 +81,11 @@ def clean_text(text):
 
         text = str(text)
 
-        text = text.replace(
-            "\n",
-            " "
-        )
+        text = text.replace("\n", " ")
+        text = text.replace("\r", " ")
+        text = text.replace("\t", " ")
 
-        text = text.replace(
-            "\r",
-            " "
-        )
-
-        text = text.replace(
-            "\t",
-            " "
-        )
-
-        return " ".join(
-            text.split()
-        )[:5000]
+        return " ".join(text.split())[:5000]
 
     except:
 
@@ -169,20 +107,17 @@ def get_user_agent():
 
     try:
 
-        if UserAgent:
-
-            return UserAgent().random
+        return UserAgent().random
 
     except:
-        pass
 
-    return (
-        "Mozilla/5.0 "
-        "(Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 "
-        "(KHTML, like Gecko) "
-        "Chrome/126.0 Safari/537.36"
-    )
+        return (
+            "Mozilla/5.0 "
+            "(Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 "
+            "(KHTML, like Gecko) "
+            "Chrome/126.0 Safari/537.36"
+        )
 
 # ==========================================================
 
@@ -191,7 +126,6 @@ def parse_relative_date(relative_text):
     try:
 
         if not relative_text:
-
             return datetime.utcnow()
 
         text = str(relative_text).lower()
@@ -211,27 +145,19 @@ def parse_relative_date(relative_text):
 
         if "day" in text:
 
-            return now - timedelta(
-                days=number
-            )
+            return now - timedelta(days=number)
 
         elif "week" in text:
 
-            return now - timedelta(
-                weeks=number
-            )
+            return now - timedelta(weeks=number)
 
         elif "month" in text:
 
-            return now - timedelta(
-                days=number * 30
-            )
+            return now - timedelta(days=number * 30)
 
         elif "year" in text:
 
-            return now - timedelta(
-                days=number * 365
-            )
+            return now - timedelta(days=number * 365)
 
         return now
 
@@ -243,36 +169,17 @@ def parse_relative_date(relative_text):
 # PROXY
 # ==========================================================
 
-def get_proxy():
+def build_proxy_url():
 
     try:
 
         if not PROXY_SERVER:
-
             return None
 
-        session_id = hashlib.md5(
-
-            str(time.time()).encode()
-
-        ).hexdigest()[:12]
-
-        username = (
-            f"{PROXY_USERNAME}"
-            f"-session-{session_id}"
+        return (
+            f"http://{PROXY_USERNAME}:"
+            f"{PROXY_PASSWORD}@{PROXY_SERVER}"
         )
-
-        return {
-
-            "server":
-                f"http://{PROXY_SERVER}",
-
-            "username":
-                username,
-
-            "password":
-                PROXY_PASSWORD
-        }
 
     except:
 
@@ -282,9 +189,7 @@ def get_proxy():
 # EXISTING IDS
 # ==========================================================
 
-async def load_existing_review_ids(
-    company_id: int
-):
+async def load_existing_review_ids(company_id: int):
 
     existing = set()
 
@@ -305,12 +210,10 @@ async def load_existing_review_ids(
             for row in rows:
 
                 if row[0]:
-
                     existing.add(row[0])
 
         logger.info(
-            f"✅ EXISTING IDS => "
-            f"{len(existing)}"
+            f"✅ EXISTING IDS => {len(existing)}"
         )
 
         return existing
@@ -327,6 +230,10 @@ async def load_existing_review_ids(
 # SERPAPI SCRAPER
 # ==========================================================
 
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_random_exponential(multiplier=2, max=15)
+)
 async def scrape_serpapi_reviews(
     place_id,
     existing_ids=None,
@@ -345,19 +252,25 @@ async def scrape_serpapi_reviews(
 
         return []
 
-    if not httpx:
-
-        logger.warning(
-            "⚠️ HTTPX NOT INSTALLED"
-        )
-
-        return []
-
     try:
+
+        proxy_url = build_proxy_url()
 
         async with httpx.AsyncClient(
 
-            timeout=REQUEST_TIMEOUT
+            timeout=REQUEST_TIMEOUT,
+
+            proxies=(
+                {
+                    "http://": proxy_url,
+                    "https://": proxy_url
+                }
+                if proxy_url else None
+            ),
+
+            headers={
+                "User-Agent": get_user_agent()
+            }
 
         ) as client:
 
@@ -370,43 +283,30 @@ async def scrape_serpapi_reviews(
             while fetched < target_limit:
 
                 params = {
-
-                    "engine":
-                        "google_maps_reviews",
-
-                    "place_id":
-                        place_id,
-
-                    "api_key":
-                        SERPAPI_KEY,
-
-                    "sort_by":
-                        "newestFirst"
+                    "engine": "google_maps_reviews",
+                    "place_id": place_id,
+                    "api_key": SERPAPI_KEY,
+                    "sort_by": "newestFirst"
                 }
 
                 if next_page_token:
-
                     params[
                         "next_page_token"
                     ] = next_page_token
 
                 logger.info(
-                    f"🚀 SERPAPI REQUEST => "
-                    f"{fetched}"
+                    f"🚀 SERPAPI REQUEST => {fetched}"
                 )
 
                 response = await client.get(
-
                     "https://serpapi.com/search.json",
-
                     params=params
                 )
 
                 if response.status_code != 200:
 
                     logger.warning(
-                        f"⚠️ SERPAPI STATUS => "
-                        f"{response.status_code}"
+                        f"⚠️ SERPAPI STATUS => {response.status_code}"
                     )
 
                     break
@@ -419,12 +319,10 @@ async def scrape_serpapi_reviews(
                 )
 
                 logger.info(
-                    f"📦 SERPAPI RAW => "
-                    f"{len(raw_reviews)}"
+                    f"📦 SERPAPI RAW => {len(raw_reviews)}"
                 )
 
                 if not raw_reviews:
-
                     break
 
                 for review in raw_reviews:
@@ -432,7 +330,6 @@ async def scrape_serpapi_reviews(
                     try:
 
                         author = clean_text(
-
                             review.get(
                                 "user",
                                 {}
@@ -450,7 +347,6 @@ async def scrape_serpapi_reviews(
                         )
 
                         if not text:
-
                             continue
 
                         review_date = clean_text(
@@ -461,7 +357,6 @@ async def scrape_serpapi_reviews(
                         )
 
                         rating = int(
-
                             review.get(
                                 "rating",
                                 5
@@ -481,40 +376,39 @@ async def scrape_serpapi_reviews(
                             continue
 
                         seen.add(review_id)
-
                         existing_ids.add(review_id)
+
+                        sentiment = (
+                            "positive"
+                            if rating >= 4
+                            else "negative"
+                        )
 
                         reviews.append({
 
-                            "review_id":
-                                review_id,
+                            "review_id": review_id,
 
-                            "author_name":
-                                author,
+                            "author_name": author,
 
-                            "rating":
-                                rating,
+                            "rating": rating,
 
-                            "review_date":
-                                review_date,
+                            "review_date": review_date,
 
                             "google_review_time":
-
                                 parse_relative_date(
                                     review_date
                                 ).isoformat(),
 
-                            "text":
-                                text,
+                            "text": text,
 
-                            "likes":
-                                0
+                            "likes": 0,
+
+                            "sentiment": sentiment
                         })
 
                         fetched += 1
 
                         if fetched >= target_limit:
-
                             break
 
                     except Exception as e:
@@ -533,14 +427,14 @@ async def scrape_serpapi_reviews(
                 )
 
                 if not next_page_token:
-
                     break
 
-                await asyncio.sleep(2)
+                await asyncio.sleep(
+                    random.uniform(1, 3)
+                )
 
         logger.info(
-            f"✅ SERPAPI REVIEWS => "
-            f"{len(reviews)}"
+            f"✅ SERPAPI REVIEWS => {len(reviews)}"
         )
 
         return reviews
@@ -557,6 +451,10 @@ async def scrape_serpapi_reviews(
 # PLAYWRIGHT FALLBACK
 # ==========================================================
 
+@retry(
+    stop=stop_after_attempt(2),
+    wait=wait_random_exponential(multiplier=2, max=10)
+)
 async def playwright_backup(
     place_id,
     existing_ids=None,
@@ -567,34 +465,31 @@ async def playwright_backup(
 
     existing_ids = existing_ids or set()
 
-    if not async_playwright:
-
-        logger.warning(
-            "⚠️ PLAYWRIGHT NOT INSTALLED"
-        )
-
-        return []
-
     browser = None
 
     try:
 
         async with async_playwright() as p:
 
+            proxy_url = build_proxy_url()
+
             browser = await p.chromium.launch(
 
                 headless=HEADLESS,
 
-                proxy=get_proxy(),
+                proxy=(
+                    {
+                        "server": f"http://{PROXY_SERVER}",
+                        "username": PROXY_USERNAME,
+                        "password": PROXY_PASSWORD
+                    }
+                    if proxy_url else None
+                ),
 
                 args=[
-
                     "--disable-blink-features=AutomationControlled",
-
                     "--disable-dev-shm-usage",
-
                     "--disable-gpu",
-
                     "--no-sandbox"
                 ]
             )
@@ -608,9 +503,12 @@ async def playwright_backup(
 
             page = await context.new_page()
 
-            if stealth_async:
+            await page.route(
+                "**/*.{png,jpg,jpeg,gif,svg,webp}",
+                lambda route: route.abort()
+            )
 
-                await stealth_async(page)
+            await stealth_async(page)
 
             url = (
                 f"https://www.google.com/maps/place/"
@@ -618,16 +516,12 @@ async def playwright_backup(
             )
 
             logger.info(
-                f"🚀 PLAYWRIGHT STARTED => "
-                f"{place_id}"
+                f"🚀 PLAYWRIGHT STARTED => {place_id}"
             )
 
             await page.goto(
-
                 url,
-
                 wait_until="domcontentloaded",
-
                 timeout=PLAYWRIGHT_TIMEOUT
             )
 
@@ -657,11 +551,12 @@ async def playwright_backup(
                 try:
 
                     await review_feed.evaluate(
-
                         "(el) => el.scrollTop = el.scrollHeight"
                     )
 
-                    await asyncio.sleep(1)
+                    await asyncio.sleep(
+                        random.uniform(0.8, 1.8)
+                    )
 
                 except:
                     pass
@@ -673,8 +568,7 @@ async def playwright_backup(
             count = await cards.count()
 
             logger.info(
-                f"📦 PLAYWRIGHT CARDS => "
-                f"{count}"
+                f"📦 PLAYWRIGHT CARDS => {count}"
             )
 
             seen = set()
@@ -686,25 +580,21 @@ async def playwright_backup(
                     card = cards.nth(i)
 
                     author = clean_text(
-
                         await card.locator(
                             ".d4r55"
                         ).inner_text()
                     )
 
                     text = clean_text(
-
                         await card.locator(
                             ".wiI7pd"
                         ).inner_text()
                     )
 
                     if not text:
-
                         continue
 
                     review_date = clean_text(
-
                         await card.locator(
                             ".rsqaWe"
                         ).inner_text()
@@ -726,10 +616,7 @@ async def playwright_backup(
                         )
 
                         if match:
-
-                            rating = int(
-                                match.group(1)
-                            )
+                            rating = int(match.group(1))
 
                     except:
                         pass
@@ -747,46 +634,44 @@ async def playwright_backup(
                         continue
 
                     seen.add(review_id)
-
                     existing_ids.add(review_id)
+
+                    sentiment = (
+                        "positive"
+                        if rating >= 4
+                        else "negative"
+                    )
 
                     reviews.append({
 
-                        "review_id":
-                            review_id,
+                        "review_id": review_id,
 
-                        "author_name":
-                            author,
+                        "author_name": author,
 
-                        "rating":
-                            rating,
+                        "rating": rating,
 
-                        "review_date":
-                            review_date,
+                        "review_date": review_date,
 
                         "google_review_time":
-
                             parse_relative_date(
                                 review_date
                             ).isoformat(),
 
-                        "text":
-                            text,
+                        "text": text,
 
-                        "likes":
-                            0
+                        "likes": 0,
+
+                        "sentiment": sentiment
                     })
 
                     if len(reviews) >= target_limit:
-
                         break
 
                 except:
                     continue
 
         logger.info(
-            f"✅ PLAYWRIGHT REVIEWS => "
-            f"{len(reviews)}"
+            f"✅ PLAYWRIGHT REVIEWS => {len(reviews)}"
         )
 
         return reviews
@@ -821,8 +706,7 @@ async def scrape_google_reviews(
 ):
 
     logger.info(
-        f"🚀 HYBRID SCRAPER STARTED => "
-        f"{place_id}"
+        f"🚀 HYBRID SCRAPER STARTED => {place_id}"
     )
 
     try:
@@ -835,10 +719,6 @@ async def scrape_google_reviews(
 
             return []
 
-        # ==================================================
-        # BACKWARD COMPATIBILITY
-        # ==================================================
-
         existing_review_ids = set()
 
         if company_id:
@@ -846,10 +726,6 @@ async def scrape_google_reviews(
             existing_review_ids = await load_existing_review_ids(
                 company_id
             )
-
-        # ==================================================
-        # PRIMARY — SERPAPI
-        # ==================================================
 
         serp_reviews = await scrape_serpapi_reviews(
 
@@ -860,16 +736,10 @@ async def scrape_google_reviews(
             target_limit=target_limit
         )
 
-        # ==================================================
-        # FALLBACK — PLAYWRIGHT
-        # ==================================================
-
         if len(serp_reviews) < target_limit:
 
             remaining = (
-                target_limit
-                -
-                len(serp_reviews)
+                target_limit - len(serp_reviews)
             )
 
             playwright_reviews = await playwright_backup(
@@ -885,19 +755,13 @@ async def scrape_google_reviews(
                 playwright_reviews
             )
 
-        # ==================================================
-        # FINAL DEDUPE
-        # ==================================================
-
         final_reviews = []
 
         seen = set()
 
         for review in serp_reviews:
 
-            rid = review.get(
-                "review_id"
-            )
+            rid = review.get("review_id")
 
             if rid and rid not in seen:
 
@@ -906,8 +770,7 @@ async def scrape_google_reviews(
                 final_reviews.append(review)
 
         logger.info(
-            f"✅ FINAL REVIEW COUNT => "
-            f"{len(final_reviews)}"
+            f"✅ FINAL REVIEW COUNT => {len(final_reviews)}"
         )
 
         return final_reviews
