@@ -601,6 +601,8 @@
                 setTimeout(initializeGoogleAutocomplete, 500);
             });
         };
+        document.getElementById('reviewFilter')
+    .addEventListener('change', loadDashboardMetrics);
     </script>
 
     <!-- GOOGLE MAPS API -->
@@ -690,7 +692,7 @@
                 const data = await response.json();
                 const typing = document.getElementById("typingMessage");
                 if(typing) typing.remove();
-                messagesContainer.innerHTML += `<div class="chatMessage botMessage">${data.answer || "No AI response available."</div>`;
+            messagesContainer.innerHTML += `<div class="chatMessage botMessage">${data.answer || "No AI response available."}</div>`;
                 messagesContainer.scrollTop = messagesContainer.scrollHeight;
             }catch(error){
                 console.error(error);
