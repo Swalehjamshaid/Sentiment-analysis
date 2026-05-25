@@ -1,7 +1,7 @@
 # ==========================================================
 # FILE: app/services/scraper.py
-# REVIEW INTEL AI - HYBRID SCRAPER
-# DB-SAFE + RAILWAY-SAFE VERSION - MAY 2026
+# REVIEW INTEL AI - RAILWAY SAFE GOOGLE REVIEWS SCRAPER
+# SERPAPI REVIEWS ENGINE + DB SAFE INSERT - MAY 2026
 # ==========================================================
 
 import os
@@ -16,8 +16,8 @@ from datetime import datetime, timedelta
 
 import httpx
 
-from playwright.async_api import async_playwright
 from fake_useragent import UserAgent
+from playwright.async_api import async_playwright
 
 from tenacity import (
     retry,
@@ -54,10 +54,10 @@ ENABLE_PLAYWRIGHT_FALLBACK = (
 REQUEST_TIMEOUT = 120
 PLAYWRIGHT_TIMEOUT = 70000
 HEADLESS = True
-MAX_SCROLLS = 30
+MAX_SCROLLS = 25
 
 # ==========================================================
-# HELPERS
+# BASIC HELPERS
 # ==========================================================
 
 def get_user_agent():
@@ -65,10 +65,8 @@ def get_user_agent():
         return UserAgent().random
     except Exception:
         return (
-            "Mozilla/5.0 "
-            "(Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 "
-            "(KHTML, like Gecko) "
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
             "Chrome/126.0 Safari/537.36"
         )
 
@@ -89,19 +87,28 @@ def clean_text(text):
         return ""
 
 
-def generate_hash(author, text):
-    raw = f"{author}_{text}"
+def safe_int(value, default=0):
+    try:
+        if value is None:
+            return default
+
+        if isinstance(value, str):
+            match = re.search(r"\d+", value)
+            if match:
+                return int(match.group(0))
+
+        return int(value)
+
+    except Exception:
+        return default
+
+
+def generate_hash(*parts):
+    raw = "_".join([clean_text(part) for part in parts if part is not None])
 
     return hashlib.md5(
         raw.encode("utf-8")
     ).hexdigest()
-
-
-def safe_int(value, default=0):
-    try:
-        return int(value)
-    except Exception:
-        return default
 
 
 def parse_relative_date(relative_text):
@@ -109,7 +116,7 @@ def parse_relative_date(relative_text):
         if not relative_text:
             return datetime.utcnow()
 
-        text = str(relative_text).lower()
+        text = str(relative_text).lower().strip()
         now = datetime.utcnow()
 
         if "just now" in text or "today" in text:
@@ -120,6 +127,12 @@ def parse_relative_date(relative_text):
 
         match = re.search(r"(\d+)", text)
         number = int(match.group(1)) if match else 1
+
+        if "minute" in text:
+            return now - timedelta(minutes=number)
+
+        if "hour" in text:
+            return now - timedelta(hours=number)
 
         if "day" in text:
             return now - timedelta(days=number)
@@ -153,50 +166,131 @@ def build_proxy_url():
         return None
 
 
-PROXY_POOL = [
-    build_proxy_url()
-]
-
-
 def get_random_proxy():
-    try:
-        proxies = [proxy for proxy in PROXY_POOL if proxy]
-        return random.choice(proxies) if proxies else None
-    except Exception:
-        return None
+    proxy = build_proxy_url()
+    return proxy if proxy else None
 
 # ==========================================================
-# EXISTING IDS
+# SQLALCHEMY MODEL HELPERS
 # ==========================================================
+
+def get_review_model_columns():
+    try:
+        return {
+            column.key
+            for column in sa_inspect(Review).mapper.column_attrs
+        }
+    except Exception as e:
+        logger.exception(f"REVIEW MODEL INSPECT FAILED => {type(e).__name__}: {e}")
+        return set()
+
+
+def get_first_existing_column(possible_columns):
+    columns = get_review_model_columns()
+
+    for column in possible_columns:
+        if column in columns:
+            return column
+
+    return None
+
 
 async def load_existing_review_ids(company_id: int):
     existing = set()
 
     try:
+        id_column_name = get_first_existing_column(
+            [
+                "google_review_id",
+                "review_id",
+                "external_review_id",
+                "external_id",
+                "hash",
+            ]
+        )
+
+        if not id_column_name:
+            logger.warning("NO REVIEW ID COLUMN FOUND FOR DUPLICATE CHECK")
+            return existing
+
+        company_column_name = get_first_existing_column(
+            [
+                "company_id",
+                "business_id",
+            ]
+        )
+
+        id_column = getattr(Review, id_column_name)
+
         async with AsyncSessionLocal() as db:
-            stmt = select(
-                Review.google_review_id
-            ).where(
-                Review.company_id == company_id
-            )
+            stmt = select(id_column)
+
+            if company_id and company_column_name:
+                stmt = stmt.where(
+                    getattr(Review, company_column_name) == company_id
+                )
 
             result = await db.execute(stmt)
             rows = result.fetchall()
 
             for row in rows:
                 if row[0]:
-                    existing.add(row[0])
+                    existing.add(str(row[0]))
 
         logger.info(f"EXISTING REVIEW IDS => {len(existing)}")
         return existing
 
     except Exception as e:
-        logger.exception(f"EXISTING REVIEW IDS FAILED => {e}")
+        logger.exception(f"LOAD EXISTING REVIEW IDS FAILED => {type(e).__name__}: {e}")
         return set()
 
 # ==========================================================
-# NORMALIZE REVIEW
+# NORMALIZE SERPAPI / PLAYWRIGHT REVIEW
 # ==========================================================
+
+def extract_review_text(review):
+    return clean_text(
+        review.get("snippet")
+        or review.get("text")
+        or review.get("description")
+        or review.get("review")
+        or ""
+    )
+
+
+def extract_author(review):
+    user = review.get("user") or {}
+
+    return clean_text(
+        user.get("name")
+        or review.get("user_name")
+        or review.get("author_name")
+        or review.get("author")
+        or "Anonymous"
+    )
+
+
+def extract_review_date_text(review):
+    return clean_text(
+        review.get("date")
+        or review.get("iso_date")
+        or review.get("published_at")
+        or review.get("relative_time_description")
+        or ""
+    )
+
+
+def extract_rating(review):
+    rating = (
+        review.get("rating")
+        or review.get("stars")
+        or review.get("score")
+        or 5
+    )
+
+    rating = safe_int(rating, 5)
+    return max(1, min(rating, 5))
+
 
 def normalize_review(
     review,
@@ -206,35 +300,16 @@ def normalize_review(
     end_date=None,
 ):
     try:
-        author = clean_text(
-            review.get("user", {}).get("name", "")
-        )
+        author = extract_author(review)
+        text = extract_review_text(review)
 
-        if not author:
-            author = "Anonymous"
-
-        text = clean_text(
-            review.get("snippet", "")
-        )
-
-        if not text:
+        if not text or len(text) < 10:
             return None
 
-        if len(text) < 10:
-            return None
+        rating = extract_rating(review)
 
-        rating = safe_int(
-            review.get("rating", 5),
-            5,
-        )
-
-        rating = max(1, min(rating, 5))
-
-        review_date = clean_text(
-            review.get("date", "")
-        )
-
-        review_datetime = parse_relative_date(review_date)
+        review_date_text = extract_review_date_text(review)
+        review_datetime = parse_relative_date(review_date_text)
 
         if start_date and review_datetime < start_date:
             return None
@@ -242,7 +317,20 @@ def normalize_review(
         if end_date and review_datetime > end_date:
             return None
 
-        google_review_id = generate_hash(author, text)
+        serpapi_review_id = clean_text(
+            review.get("review_id")
+            or review.get("link")
+            or review.get("id")
+            or ""
+        )
+
+        google_review_id = (
+            serpapi_review_id
+            if serpapi_review_id
+            else generate_hash(author, text, str(rating), review_date_text)
+        )
+
+        google_review_id = str(google_review_id)
 
         if google_review_id in seen or google_review_id in existing_ids:
             return None
@@ -254,95 +342,92 @@ def normalize_review(
 
         return {
             "google_review_id": google_review_id,
+            "review_id": google_review_id,
             "author_name": author,
+            "reviewer_name": author,
             "rating": rating,
-            "review_date": review_date,
+            "stars": rating,
+            "review_date": review_date_text,
             "google_review_time": review_datetime,
+            "review_datetime": review_datetime,
             "text": text,
-            "likes": safe_int(review.get("likes", 0)),
+            "review_text": text,
+            "content": text,
+            "likes": safe_int(review.get("likes"), 0),
             "sentiment": sentiment,
+            "source": "google",
+            "platform": "google",
         }
 
     except Exception as e:
-        logger.warning(f"NORMALIZE REVIEW FAILED => {e}")
+        logger.warning(f"NORMALIZE REVIEW FAILED => {type(e).__name__}: {e}")
         return None
 
 # ==========================================================
-# DB SAFE PAYLOAD
+# DB SAFE PAYLOAD BUILDER
 # ==========================================================
-
-def get_review_model_columns():
-    try:
-        return {
-            column.key
-            for column in sa_inspect(Review).mapper.column_attrs
-        }
-    except Exception as e:
-        logger.exception(f"REVIEW MODEL INSPECT FAILED => {e}")
-        return set()
-
 
 def build_review_payload(company_id: int, review: dict):
     columns = get_review_model_columns()
     payload = {}
 
-    if "company_id" in columns:
-        payload["company_id"] = company_id
-
-    field_aliases = {
-        "google_review_id": [
-            "google_review_id",
-            "review_id",
-        ],
-        "author_name": [
-            "author_name",
-            "reviewer_name",
-            "author",
-            "name",
-        ],
-        "rating": [
-            "rating",
-            "stars",
-        ],
-        "review_date": [
-            "review_date",
-            "date",
-        ],
-        "google_review_time": [
-            "google_review_time",
-            "review_datetime",
-            "created_at_google",
-        ],
-        "text": [
-            "text",
-            "review_text",
-            "content",
-            "comment",
-        ],
-        "likes": [
-            "likes",
-            "helpful_count",
-        ],
-        "sentiment": [
-            "sentiment",
-        ],
+    direct_defaults = {
+        "company_id": company_id,
+        "business_id": company_id,
+        "source": "google",
+        "platform": "google",
     }
 
-    for model_field, possible_keys in field_aliases.items():
-        if model_field not in columns:
+    for column, value in direct_defaults.items():
+        if column in columns and value is not None:
+            payload[column] = value
+
+    field_sources = {
+        "google_review_id": ["google_review_id", "review_id"],
+        "review_id": ["review_id", "google_review_id"],
+        "external_review_id": ["google_review_id", "review_id"],
+        "external_id": ["google_review_id", "review_id"],
+        "hash": ["google_review_id", "review_id"],
+
+        "author_name": ["author_name", "reviewer_name"],
+        "reviewer_name": ["reviewer_name", "author_name"],
+        "author": ["author_name", "reviewer_name"],
+        "name": ["author_name", "reviewer_name"],
+
+        "rating": ["rating", "stars"],
+        "stars": ["stars", "rating"],
+
+        "review_date": ["review_date"],
+        "date": ["review_date"],
+        "google_review_time": ["google_review_time", "review_datetime"],
+        "review_datetime": ["review_datetime", "google_review_time"],
+
+        "text": ["text", "review_text", "content"],
+        "review_text": ["review_text", "text", "content"],
+        "content": ["content", "review_text", "text"],
+        "comment": ["text", "review_text", "content"],
+
+        "likes": ["likes"],
+        "helpful_count": ["likes"],
+
+        "sentiment": ["sentiment"],
+    }
+
+    for model_column, source_keys in field_sources.items():
+        if model_column not in columns:
             continue
 
-        for key in possible_keys:
-            value = review.get(key)
+        for source_key in source_keys:
+            value = review.get(source_key)
 
             if value is not None:
-                payload[model_field] = value
+                payload[model_column] = value
                 break
 
     return payload
 
 # ==========================================================
-# SAVE REVIEWS
+# SAVE REVIEWS TO DATABASE
 # ==========================================================
 
 async def save_reviews_to_db(company_id: int, reviews: list[dict]):
@@ -359,18 +444,18 @@ async def save_reviews_to_db(company_id: int, reviews: list[dict]):
     async with AsyncSessionLocal() as db:
         try:
             existing_ids = await load_existing_review_ids(company_id)
-            columns = get_review_model_columns()
 
             for review in reviews:
-                google_review_id = (
+                review_unique_id = str(
                     review.get("google_review_id")
                     or review.get("review_id")
+                    or ""
                 )
 
-                if not google_review_id:
+                if not review_unique_id:
                     continue
 
-                if google_review_id in existing_ids:
+                if review_unique_id in existing_ids:
                     continue
 
                 payload = build_review_payload(
@@ -378,16 +463,14 @@ async def save_reviews_to_db(company_id: int, reviews: list[dict]):
                     review=review,
                 )
 
-                if "google_review_id" in columns:
-                    payload["google_review_id"] = google_review_id
-
                 if not payload:
+                    logger.warning("EMPTY REVIEW PAYLOAD SKIPPED")
                     continue
 
                 db_review = Review(**payload)
                 db.add(db_review)
 
-                existing_ids.add(google_review_id)
+                existing_ids.add(review_unique_id)
                 saved_count += 1
 
             await db.commit()
@@ -397,19 +480,38 @@ async def save_reviews_to_db(company_id: int, reviews: list[dict]):
 
         except Exception as e:
             await db.rollback()
-            logger.exception(f"SAVE REVIEWS FAILED => {e}")
+            logger.exception(f"SAVE REVIEWS FAILED => {type(e).__name__}: {e}")
             return 0
 
 # ==========================================================
-# SERPAPI SCRAPER
+# SERPAPI GOOGLE MAPS REVIEWS SCRAPER
 # ==========================================================
+
+def build_serpapi_params(place_id, next_page_token=None):
+    params = {
+        "engine": "google_maps_reviews",
+        "api_key": SERPAPI_KEY,
+        "hl": "en",
+        "gl": "us",
+        "sort_by": "newestFirst",
+    }
+
+    place_id = clean_text(place_id)
+
+    if place_id.startswith("0x") or ":0x" in place_id:
+        params["data_id"] = place_id
+    else:
+        params["place_id"] = place_id
+
+    if next_page_token:
+        params["next_page_token"] = next_page_token
+
+    return params
+
 
 @retry(
     stop=stop_after_attempt(3),
-    wait=wait_random_exponential(
-        multiplier=2,
-        max=15,
-    ),
+    wait=wait_random_exponential(multiplier=2, max=15),
 )
 async def scrape_serpapi_reviews(
     place_id,
@@ -425,17 +527,21 @@ async def scrape_serpapi_reviews(
         logger.error("SERPAPI KEY MISSING")
         return []
 
-    try:
-        proxy_url = get_random_proxy()
+    if not place_id:
+        logger.error("PLACE ID MISSING FOR SERPAPI")
+        return []
 
+    try:
+        headers = {
+            "User-Agent": get_user_agent(),
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept": "application/json",
+        }
+
+        proxy_url = get_random_proxy()
         client_kwargs = {
             "timeout": REQUEST_TIMEOUT,
-            "headers": {
-                "User-Agent": get_user_agent(),
-                "Accept-Language": "en-US,en;q=0.9",
-                "Accept": "*/*",
-                "Connection": "keep-alive",
-            },
+            "headers": headers,
         }
 
         if proxy_url:
@@ -447,18 +553,14 @@ async def scrape_serpapi_reviews(
             seen = set()
 
             while fetched < target_limit:
-                params = {
-                    "engine": "google_maps",
-                    "place_id": place_id,
-                    "api_key": SERPAPI_KEY,
-                    "hl": "en",
-                    "gl": "us",
-                }
+                params = build_serpapi_params(
+                    place_id=place_id,
+                    next_page_token=next_page_token,
+                )
 
-                if next_page_token:
-                    params["next_page_token"] = next_page_token
-
-                logger.info(f"SERPAPI REQUEST START => {fetched}")
+                logger.info(
+                    f"SERPAPI GOOGLE MAPS REVIEWS REQUEST => fetched={fetched}"
+                )
 
                 response = await client.get(
                     "https://serpapi.com/search.json",
@@ -469,29 +571,34 @@ async def scrape_serpapi_reviews(
 
                 if response.status_code != 200:
                     logger.warning(
-                        f"SERPAPI BAD STATUS => {response.status_code} | {response.text[:500]}"
+                        f"SERPAPI BAD STATUS => {response.status_code} | {response.text[:800]}"
                     )
                     break
 
                 data = response.json()
 
-                if "error" in data:
-                    logger.error(f"SERPAPI ERROR => {data['error']}")
-                    return []
+                search_status = data.get("search_metadata", {}).get("status")
+                serp_error = data.get("error")
+                place_info = data.get("place_info") or {}
 
-                raw_reviews = (
-                    data.get("reviews", [])
-                    or data.get("place_results", {}).get("reviews", [])
-                )
+                logger.info(f"SERPAPI SEARCH STATUS => {search_status}")
+                logger.info(f"SERPAPI PLACE TITLE => {place_info.get('title')}")
+                logger.info(f"SERPAPI PLACE TOTAL REVIEWS => {place_info.get('reviews')}")
+
+                if serp_error:
+                    logger.error(f"SERPAPI ERROR => {serp_error}")
+                    break
+
+                raw_reviews = data.get("reviews", []) or []
 
                 logger.info(f"SERPAPI RAW REVIEWS => {len(raw_reviews)}")
 
                 if not raw_reviews:
                     break
 
-                for review in raw_reviews:
+                for raw_review in raw_reviews:
                     normalized = normalize_review(
-                        review=review,
+                        review=raw_review,
                         existing_ids=existing_ids,
                         seen=seen,
                         start_date=start_date,
@@ -509,16 +616,12 @@ async def scrape_serpapi_reviews(
 
                 next_page_token = data.get(
                     "serpapi_pagination", {}
-                ).get(
-                    "next_page_token"
-                )
+                ).get("next_page_token")
 
                 if not next_page_token:
                     break
 
-                await asyncio.sleep(
-                    random.uniform(1, 3)
-                )
+                await asyncio.sleep(random.uniform(1, 2.5))
 
         logger.info(f"SERPAPI REVIEWS FETCHED => {len(reviews)}")
         return reviews
@@ -529,16 +632,12 @@ async def scrape_serpapi_reviews(
 
 # ==========================================================
 # PLAYWRIGHT FALLBACK
-# Disabled by default. Enable only with:
-# ENABLE_PLAYWRIGHT_FALLBACK=true
+# DISABLED BY DEFAULT ON RAILWAY
 # ==========================================================
 
 @retry(
     stop=stop_after_attempt(2),
-    wait=wait_random_exponential(
-        multiplier=2,
-        max=10,
-    ),
+    wait=wait_random_exponential(multiplier=2, max=10),
 )
 async def playwright_backup(
     place_id,
@@ -625,32 +724,32 @@ async def playwright_backup(
             await page.wait_for_timeout(5000)
 
             try:
-                consent_buttons = page.locator(
+                buttons = page.locator(
                     'button:has-text("Accept all"), '
                     'button:has-text("I agree"), '
                     'button:has-text("Accept")'
                 )
 
-                if await consent_buttons.count() > 0:
-                    await consent_buttons.first.click()
-                    await page.wait_for_timeout(3000)
+                if await buttons.count() > 0:
+                    await buttons.first.click()
+                    await page.wait_for_timeout(2500)
 
             except Exception:
                 pass
 
             try:
-                reviews_button = page.locator(
+                review_button = page.locator(
                     'button[jsaction*="pane.reviewChart.moreReviews"], '
-                    'button:has-text("reviews"), '
-                    'button:has-text("Reviews")'
+                    'button:has-text("Reviews"), '
+                    'button:has-text("reviews")'
                 )
 
-                if await reviews_button.count() > 0:
-                    await reviews_button.first.click()
+                if await review_button.count() > 0:
+                    await review_button.first.click()
                     await page.wait_for_timeout(5000)
 
-            except Exception as button_error:
-                logger.warning(f"REVIEW BUTTON FAILED => {button_error}")
+            except Exception as e:
+                logger.warning(f"PLAYWRIGHT REVIEW BUTTON FAILED => {e}")
 
             review_feed = page.locator('div[role="feed"]')
 
@@ -661,14 +760,8 @@ async def playwright_backup(
                             "(el) => el.scrollTop = el.scrollHeight"
                         )
 
-                    await page.mouse.wheel(
-                        0,
-                        random.randint(1000, 3000),
-                    )
-
-                    await page.wait_for_timeout(
-                        random.randint(1000, 2000)
-                    )
+                    await page.mouse.wheel(0, random.randint(1200, 3000))
+                    await page.wait_for_timeout(random.randint(1000, 2000))
 
                 except Exception:
                     pass
@@ -712,21 +805,17 @@ async def playwright_backup(
                     if not text:
                         continue
 
-                    review_date = ""
-
                     try:
                         review_date = clean_text(
                             await card.locator(".rsqaWe").inner_text()
                         )
                     except Exception:
-                        pass
+                        review_date = ""
 
                     rating = 5
 
                     try:
-                        aria = await card.locator(
-                            ".kvMYJc"
-                        ).get_attribute(
+                        aria = await card.locator(".kvMYJc").get_attribute(
                             "aria-label"
                         )
 
@@ -807,9 +896,7 @@ async def scrape_google_reviews(
         existing_review_ids = set()
 
         if company_id:
-            existing_review_ids = await load_existing_review_ids(
-                company_id
-            )
+            existing_review_ids = await load_existing_review_ids(company_id)
 
         serp_reviews = await scrape_serpapi_reviews(
             place_id=place_id,
@@ -841,14 +928,23 @@ async def scrape_google_reviews(
         seen = set()
 
         for review in serp_reviews:
-            rid = (
+            review_id = str(
                 review.get("google_review_id")
                 or review.get("review_id")
+                or ""
             )
 
-            if rid and rid not in seen and review.get("text"):
-                seen.add(rid)
-                final_reviews.append(review)
+            if not review_id:
+                continue
+
+            if review_id in seen:
+                continue
+
+            if not review.get("text") and not review.get("review_text"):
+                continue
+
+            seen.add(review_id)
+            final_reviews.append(review)
 
         logger.info(f"FINAL REVIEW COUNT => {len(final_reviews)}")
 
