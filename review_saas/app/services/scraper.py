@@ -3,10 +3,9 @@
 # TRUSTLYTICS AI - ULTRA ENTERPRISE GOOGLE REVIEW SCRAPER
 # FULLY STABILIZED PRODUCTION VERSION
 # =========================================================
+from __future__ import annotations
 
 print("🔥 SCRAPER.PY LOADED")
-
-from __future__ import annotations
 
 import os
 import re
