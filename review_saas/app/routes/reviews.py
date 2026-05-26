@@ -1,6 +1,7 @@
 # =========================================================
 # FILE: app/routes/reviews.py
 # TRUSTLYTICS AI - FULL ASYNC ENTERPRISE VERSION
+# FULLY DEBUGGED + SCRAPER VISIBILITY VERSION
 # =========================================================
 
 from fastapi import (
@@ -51,17 +52,29 @@ SCRAPER_AVAILABLE = False
 
 try:
 
+    print(
+        "🔥 TRYING TO IMPORT SCRAPER"
+    )
+
     from app.scraper import scrape_google_reviews
 
     SCRAPER_AVAILABLE = True
 
-    print("✅ SCRAPER IMPORTED SUCCESSFULLY")
+    print(
+        "✅ SCRAPER IMPORTED SUCCESSFULLY"
+    )
+
+    print(
+        f"🔥 SCRAPER FUNCTION => {scrape_google_reviews}"
+    )
 
 except Exception as scraper_error:
 
     import traceback
 
     scrape_google_reviews = None
+
+    SCRAPER_AVAILABLE = False
 
     print("❌ SCRAPER IMPORT FAILED")
 
@@ -153,23 +166,51 @@ def generate_google_review_id(
         raw_value.encode("utf-8")
     ).hexdigest()
 
+# =========================================================
+# SCRAPER EXECUTION
+# =========================================================
 
 async def run_scraper(
     google_place_id: str
 ):
 
+    print(
+        f"🔥 run_scraper EXECUTED => {google_place_id}"
+    )
+
     if scrape_google_reviews is None:
+
+        print(
+            "❌ scrape_google_reviews IS NONE"
+        )
+
         return []
 
     result = scrape_google_reviews(
         google_place_id
     )
 
+    print(
+        f"🔥 SCRAPER RESULT TYPE => {type(result)}"
+    )
+
     if inspect.isawaitable(result):
+
+        print(
+            "🔥 RESULT IS AWAITABLE"
+        )
+
         result = await result
+
+    print(
+        f"🔥 SCRAPER FINAL RESULT => {len(result or [])}"
+    )
 
     return result or []
 
+# =========================================================
+# RESPONSE BUILDER
+# =========================================================
 
 def build_sync_response(
     success: bool,
@@ -206,7 +247,6 @@ def build_sync_response(
 
         "scraped_reviews": scraped_reviews,
 
-        # Frontend compatibility aliases
         "reviews_collected": inserted_reviews,
 
         "reviewsCollected": inserted_reviews,
@@ -221,7 +261,6 @@ def build_sync_response(
 
         "scrapedReviews": scraped_reviews
     }
-
 
 # =========================================================
 # HEALTH ROUTE
@@ -242,52 +281,6 @@ async def reviews_health():
 
         "timestamp": datetime.utcnow().isoformat()
     }
-
-
-# =========================================================
-# TEST ROUTE
-# =========================================================
-
-@router.get("/test-sync")
-async def test_sync():
-
-    return {
-
-        "success": True,
-
-        "message": "TEST ROUTE WORKING",
-
-        "scraper_available": SCRAPER_AVAILABLE
-    }
-
-
-# =========================================================
-# DEBUG ROUTES
-# =========================================================
-
-@router.get("/debug/routes")
-async def debug_routes():
-
-    return {
-
-        "success": True,
-
-        "routes": [
-
-            "/api/reviews/health",
-
-            "/api/reviews/test-sync",
-
-            "/api/reviews/company/{company_id}",
-
-            "/api/reviews/sync/{company_id}",
-
-            "/api/reviews/analytics/{company_id}",
-
-            "/api/reviews/delete/{review_id}"
-        ]
-    }
-
 
 # =========================================================
 # GET COMPANY REVIEWS
@@ -450,7 +443,6 @@ async def get_company_reviews(
             detail=str(e)
         )
 
-
 # =========================================================
 # SYNC REVIEWS
 # =========================================================
@@ -468,6 +460,10 @@ async def sync_reviews(
 
         logger.info(
             f"🚀 SYNC STARTED => {company_id}"
+        )
+
+        print(
+            f"🔥 SCRAPER AVAILABLE => {SCRAPER_AVAILABLE}"
         )
 
         company_result = await db.execute(
@@ -526,6 +522,14 @@ async def sync_reviews(
 
         scraped_reviews = await run_scraper(
             google_place_id
+        )
+
+        print(
+            f"🔥 SCRAPED REVIEWS => {len(scraped_reviews)}"
+        )
+
+        print(
+            f"🔥 SCRAPER SAMPLE => {scraped_reviews[:1]}"
         )
 
         if not scraped_reviews:
@@ -731,173 +735,6 @@ async def sync_reviews(
 
             detail=str(e)
         )
-
-
-# =========================================================
-# ANALYTICS
-# =========================================================
-
-@router.get("/analytics/{company_id}")
-async def review_analytics(
-
-    company_id: int,
-
-    db: AsyncSession = Depends(get_db)
-):
-
-    try:
-
-        company_result = await db.execute(
-
-            select(Company).where(
-                Company.id == company_id
-            )
-        )
-
-        company = company_result.scalar_one_or_none()
-
-        if not company:
-
-            raise HTTPException(
-
-                status_code=404,
-
-                detail="Company not found"
-            )
-
-        result = await db.execute(
-
-            select(Review).where(
-                Review.company_id == company_id
-            )
-        )
-
-        reviews = result.scalars().all()
-
-        total_reviews = len(reviews)
-
-        if total_reviews == 0:
-
-            return {
-
-                "success": True,
-
-                "company_id": company_id,
-
-                "total_reviews": 0,
-
-                "average_rating": 0
-            }
-
-        average_rating = round(
-
-            sum([
-                review.rating or 0
-                for review in reviews
-            ]) / total_reviews,
-
-            2
-        )
-
-        return {
-
-            "success": True,
-
-            "company_id": company_id,
-
-            "total_reviews": total_reviews,
-
-            "average_rating": average_rating
-        }
-
-    except HTTPException:
-        raise
-
-    except Exception as e:
-
-        logger.error(
-            f"❌ ANALYTICS ERROR => {e}"
-        )
-
-        logger.error(
-            traceback.format_exc()
-        )
-
-        raise HTTPException(
-
-            status_code=500,
-
-            detail=str(e)
-        )
-
-
-# =========================================================
-# DELETE REVIEW
-# =========================================================
-
-@router.delete("/delete/{review_id}")
-async def delete_review(
-
-    review_id: int,
-
-    db: AsyncSession = Depends(get_db)
-):
-
-    try:
-
-        result = await db.execute(
-
-            select(Review).where(
-                Review.id == review_id
-            )
-        )
-
-        review = result.scalar_one_or_none()
-
-        if not review:
-
-            raise HTTPException(
-
-                status_code=404,
-
-                detail="Review not found"
-            )
-
-        await db.delete(review)
-
-        await db.commit()
-
-        return {
-
-            "success": True,
-
-            "message": "Review deleted",
-
-            "review_id": review_id
-        }
-
-    except HTTPException:
-        raise
-
-    except Exception as e:
-
-        await db.rollback()
-
-        logger.error(
-            f"❌ DELETE REVIEW ERROR => {e}"
-        )
-
-        logger.error(
-            traceback.format_exc()
-        )
-
-        raise HTTPException(
-
-            status_code=500,
-
-            detail=str(e)
-        )
-
 
 # =========================================================
 # ROUTER READY
