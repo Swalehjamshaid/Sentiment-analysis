@@ -1,100 +1,55 @@
 # =========================================================
 # FILE: review_saas/app/routes/reviews.py
-# TRUSTLYTICS AI - ENTERPRISE REVIEWS ROUTER
-# FULLY STABILIZED VERSION
+# TRUSTLYTICS AI - FINAL STABLE VERSION
 # =========================================================
 
 print("🔥 REVIEWS.PY IMPORT STARTED")
 
 # =========================================================
-# SAFE IMPORTS
+# IMPORTS
 # =========================================================
 
-try:
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Query
+)
 
-    from fastapi import (
-        APIRouter,
-        Depends,
-        HTTPException,
-        Query
-    )
+from sqlalchemy.orm import Session
 
-    print("✅ FASTAPI IMPORTED")
+from sqlalchemy import (
+    desc,
+    func,
+    and_
+)
 
-except Exception as e:
+from typing import Optional
 
-    print(f"❌ FASTAPI IMPORT FAILED => {e}")
+from datetime import datetime
 
-try:
-
-    from sqlalchemy.orm import Session
-
-    from sqlalchemy import (
-        desc,
-        func,
-        and_
-    )
-
-    print("✅ SQLALCHEMY IMPORTED")
-
-except Exception as e:
-
-    print(f"❌ SQLALCHEMY IMPORT FAILED => {e}")
-
-try:
-
-    from typing import Optional
-
-    from datetime import datetime
-
-    import traceback
-
-    import logging
-
-    print("✅ PYTHON MODULES IMPORTED")
-
-except Exception as e:
-
-    print(f"❌ PYTHON MODULE IMPORT FAILED => {e}")
+import traceback
+import logging
 
 # =========================================================
-# DATABASE IMPORT
+# DATABASE
 # =========================================================
 
-try:
-
-    from app.core.db import get_db
-
-    print("✅ DATABASE IMPORTED")
-
-except Exception as e:
-
-    print(f"❌ DATABASE IMPORT FAILED => {e}")
-
-    get_db = None
+from app.core.db import get_db
 
 # =========================================================
-# MODELS IMPORT
+# MODELS
 # =========================================================
 
-try:
-
-   from app.core.models import (
+from app.core.models import (
     Company,
     Review
 )
 
-    print("✅ MODELS IMPORTED")
-
-except Exception as e:
-
-    print(f"❌ MODELS IMPORT FAILED => {e}")
-
-    Company = None
-    Review = None
+print("✅ MODELS IMPORTED")
 
 # =========================================================
-# SCRAPER IMPORT
+# SCRAPER
 # =========================================================
 
 SCRAPER_AVAILABLE = False
@@ -107,11 +62,13 @@ try:
 
     print("✅ SCRAPER IMPORTED")
 
-except Exception as e:
+except Exception as scraper_error:
 
     scrape_google_reviews = None
 
-    print(f"❌ SCRAPER IMPORT FAILED => {e}")
+    print(
+        f"❌ SCRAPER IMPORT FAILED => {scraper_error}"
+    )
 
 # =========================================================
 # LOGGER
@@ -221,8 +178,6 @@ async def get_company_reviews(
 
     rating: Optional[int] = None,
 
-    sentiment: Optional[str] = None,
-
     db: Session = Depends(get_db)
 ):
 
@@ -231,24 +186,6 @@ async def get_company_reviews(
         logger.info(
             f"📊 FETCHING REVIEWS => {company_id}"
         )
-
-        if Company is None:
-
-            raise HTTPException(
-
-                status_code=500,
-
-                detail="Company model import failed"
-            )
-
-        if Review is None:
-
-            raise HTTPException(
-
-                status_code=500,
-
-                detail="Review model import failed"
-            )
 
         company = db.query(Company).filter(
             Company.id == company_id
@@ -268,21 +205,13 @@ async def get_company_reviews(
         )
 
         # =================================================
-        # FILTERS
+        # FILTER BY RATING
         # =================================================
 
         if rating is not None:
 
             query = query.filter(
                 Review.rating == rating
-            )
-
-        if sentiment:
-
-            query = query.filter(
-                func.lower(
-                    Review.sentiment
-                ) == sentiment.lower()
             )
 
         total_reviews = query.count()
@@ -301,19 +230,18 @@ async def get_company_reviews(
 
                 "company_id": review.company_id,
 
-                "author": review.author,
+                "author": review.author_name,
 
                 "rating": review.rating,
 
-                "content": review.review_text,
+                "content": review.text,
 
-                "review_text": review.review_text,
+                "review_text": review.text,
 
-                "sentiment": review.sentiment,
+                "sentiment_score": review.sentiment_score,
 
-                "source": review.source,
-
-                "review_date": review.review_date,
+                "google_review_time":
+                    review.google_review_time,
 
                 "created_at": review.created_at
             })
@@ -374,24 +302,6 @@ async def sync_reviews(
             f"🚀 SYNC STARTED => {company_id}"
         )
 
-        if Company is None:
-
-            raise HTTPException(
-
-                status_code=500,
-
-                detail="Company model import failed"
-            )
-
-        if Review is None:
-
-            raise HTTPException(
-
-                status_code=500,
-
-                detail="Review model import failed"
-            )
-
         company = db.query(Company).filter(
             Company.id == company_id
         ).first()
@@ -425,19 +335,7 @@ async def sync_reviews(
         # PLACE ID
         # =================================================
 
-        google_place_id = getattr(
-            company,
-            "google_place_id",
-            None
-        )
-
-        if not google_place_id:
-
-            google_place_id = getattr(
-                company,
-                "place_id",
-                None
-            )
+        google_place_id = company.google_place_id
 
         if not google_place_id:
 
@@ -518,15 +416,19 @@ async def sync_reviews(
                     )
                 )
 
+                # =========================================
+                # DUPLICATE CHECK
+                # =========================================
+
                 existing_review = db.query(Review).filter(
 
                     and_(
 
                         Review.company_id == company_id,
 
-                        Review.review_text == review_text,
+                        Review.text == review_text,
 
-                        Review.author == author
+                        Review.author_name == author
                     )
 
                 ).first()
@@ -538,20 +440,6 @@ async def sync_reviews(
                     continue
 
                 # =========================================
-                # SENTIMENT
-                # =========================================
-
-                sentiment = "neutral"
-
-                if rating >= 4:
-
-                    sentiment = "positive"
-
-                elif rating <= 2:
-
-                    sentiment = "negative"
-
-                # =========================================
                 # CREATE REVIEW
                 # =========================================
 
@@ -559,20 +447,21 @@ async def sync_reviews(
 
                     company_id=company_id,
 
-                    author=author,
+                    google_review_id=str(
+                        hash(
+                            review_text + author
+                        )
+                    ),
+
+                    author_name=author,
 
                     rating=rating,
 
-                    review_text=review_text,
+                    text=review_text,
 
-                    sentiment=sentiment,
+                    sentiment_score=0.5,
 
-                    source=item.get(
-                        "source",
-                        "Google"
-                    ),
-
-                    review_date=datetime.utcnow(),
+                    google_review_time=datetime.utcnow(),
 
                     created_at=datetime.utcnow()
                 )
@@ -671,13 +560,7 @@ async def review_analytics(
 
                 "total_reviews": 0,
 
-                "average_rating": 0,
-
-                "positive_reviews": 0,
-
-                "negative_reviews": 0,
-
-                "neutral_reviews": 0
+                "average_rating": 0
             }
 
         average_rating = round(
@@ -690,27 +573,6 @@ async def review_analytics(
             2
         )
 
-        positive_reviews = len([
-
-            review for review in reviews
-
-            if review.sentiment == "positive"
-        ])
-
-        negative_reviews = len([
-
-            review for review in reviews
-
-            if review.sentiment == "negative"
-        ])
-
-        neutral_reviews = len([
-
-            review for review in reviews
-
-            if review.sentiment == "neutral"
-        ])
-
         return {
 
             "success": True,
@@ -719,13 +581,7 @@ async def review_analytics(
 
             "total_reviews": total_reviews,
 
-            "average_rating": average_rating,
-
-            "positive_reviews": positive_reviews,
-
-            "negative_reviews": negative_reviews,
-
-            "neutral_reviews": neutral_reviews
+            "average_rating": average_rating
         }
 
     except Exception as e:
