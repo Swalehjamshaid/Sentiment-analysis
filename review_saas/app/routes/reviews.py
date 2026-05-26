@@ -1,95 +1,56 @@
 # =========================================================
 # FILE: review_saas/app/routes/reviews.py
 # =========================================================
-#
-# ENTERPRISE AI REVIEW MANAGEMENT ROUTER
-# ---------------------------------------------------------
-# FEATURES:
-#
-# ✅ Google Review Sync
-# ✅ Multi-layer Duplicate Detection
-# ✅ Dashboard Integration
-# ✅ Analytics APIs
-# ✅ Review Filtering
-# ✅ Pagination
-# ✅ AI Sentiment Ready
-# ✅ SaaS Production Structure
-# ✅ Logging
-# ✅ Error Handling
-# ✅ FastAPI Best Practices
-# ✅ SQLAlchemy Optimized Queries
-# ✅ Background Sync Ready
-# ✅ Railway / Render Compatible
-# ✅ Frontend Compatible
-# ✅ Swagger Docs Ready
-# ✅ Authentication Protected
-# ✅ Review Statistics
-# ✅ Review Deletion
-# ✅ Recent Reviews API
-# ✅ Health Monitoring
-# ✅ Debugging APIs
-# ✅ AI Executive Reporting Ready
-#
-# FINAL GENERATED ROUTES:
-#
-# /api/reviews/health
-# /api/reviews/company/{company_id}
-# /api/reviews/sync/{company_id}
-# /api/reviews/analytics/{company_id}
-# /api/reviews/latest/{company_id}
-# /api/reviews/delete/{review_id}
-# /api/reviews/debug/routes
-# /api/reviews/stats/{company_id}
-#
-# =========================================================
 
 from fastapi import (
     APIRouter,
     Depends,
     HTTPException,
     Query,
-    BackgroundTasks,
-    status
+    BackgroundTasks
 )
 
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, func, and_
 
-from typing import Optional, Dict, Any, List
-
-from datetime import datetime, timedelta
+from typing import Optional
+from datetime import datetime
 
 import logging
 import traceback
-import asyncio
+
+# =========================================================
+# DEBUG LOGS
+# =========================================================
+
 print("🔥 ACTIVE REVIEWS.PY LOADED 🔥")
-# =========================================================
-# DATABASE IMPORTS
-# =========================================================
-
-from database import get_db
 
 # =========================================================
-# MODEL IMPORTS
+# DATABASE
 # =========================================================
 
-from models import (
+from app.database import get_db
+
+# =========================================================
+# MODELS
+# =========================================================
+
+from app.models import (
     Company,
     Review
 )
 
 # =========================================================
-# AUTH IMPORTS
+# AUTH
 # =========================================================
 
-from auth import get_current_user
+from app.auth import get_current_user
 
 # =========================================================
 # SCRAPER IMPORT
 # =========================================================
 
 try:
-
 
     from app.scraper import scrape_google_reviews
 
@@ -104,13 +65,13 @@ except Exception as scraper_error:
     )
 
 # =========================================================
-# LOGGER CONFIGURATION
+# LOGGER
 # =========================================================
 
 logger = logging.getLogger(__name__)
 
 # =========================================================
-# ROUTER CONFIGURATION
+# ROUTER
 # =========================================================
 
 router = APIRouter(
@@ -123,17 +84,12 @@ router = APIRouter(
 # =========================================================
 
 @router.get("/health")
-async def review_health_check():
-
-    """
-    REVIEW MODULE HEALTH CHECK
-    """
+async def review_health():
 
     return {
         "success": True,
-        "module": "reviews.py",
-        "status": "healthy",
-        "timestamp": datetime.utcnow().isoformat()
+        "message": "reviews.py working",
+        "timestamp": datetime.utcnow()
     }
 
 # =========================================================
@@ -142,10 +98,6 @@ async def review_health_check():
 
 @router.get("/debug/routes")
 async def debug_routes():
-
-    """
-    DEBUG ROUTES
-    """
 
     return {
         "success": True,
@@ -156,8 +108,7 @@ async def debug_routes():
             "GET /api/reviews/analytics/{company_id}",
             "GET /api/reviews/latest/{company_id}",
             "DELETE /api/reviews/delete/{review_id}",
-            "GET /api/reviews/stats/{company_id}",
-            "GET /api/reviews/debug/routes"
+            "GET /api/reviews/stats/{company_id}"
         ]
     }
 
@@ -165,18 +116,12 @@ async def debug_routes():
 # TEST ROUTE
 # =========================================================
 
-@router.get("/test-sync-route")
-async def test_sync_route():
-
-    """
-    TEST SYNC ROUTE
-    """
+@router.get("/test-sync")
+async def test_sync():
 
     return {
         "success": True,
-        "message": "SYNC ROUTE ACTIVE",
-        "method": "POST",
-        "endpoint": "/api/reviews/sync/{company_id}"
+        "message": "SYNC ROUTE REGISTERED"
     }
 
 # =========================================================
@@ -190,19 +135,14 @@ async def get_company_reviews(
     skip: int = Query(0, ge=0),
     rating: Optional[int] = None,
     sentiment: Optional[str] = None,
-    source: Optional[str] = None,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user)
+    current_user=Depends(get_current_user)
 ):
-
-    """
-    GET COMPANY REVIEWS
-    """
 
     try:
 
         logger.info(
-            f"FETCHING REVIEWS FOR COMPANY {company_id}"
+            f"FETCHING REVIEWS => COMPANY {company_id}"
         )
 
         company = db.query(Company).filter(
@@ -221,7 +161,7 @@ async def get_company_reviews(
         )
 
         # =================================================
-        # FILTERS
+        # OPTIONAL FILTERS
         # =================================================
 
         if rating:
@@ -237,17 +177,9 @@ async def get_company_reviews(
                 == sentiment.lower()
             )
 
-        if source:
-
-            query = query.filter(
-                func.lower(Review.source)
-                == source.lower()
-            )
-
         total_reviews = query.count()
 
         reviews = query.order_by(
-            desc(Review.review_date),
             desc(Review.created_at)
         ).offset(skip).limit(limit).all()
 
@@ -261,47 +193,19 @@ async def get_company_reviews(
 
                 "company_id": review.company_id,
 
-                "author": getattr(
-                    review,
-                    "author",
-                    "Anonymous"
-                ),
+                "author": review.author,
 
-                "rating": getattr(
-                    review,
-                    "rating",
-                    0
-                ),
+                "rating": review.rating,
 
-                "review_text": getattr(
-                    review,
-                    "review_text",
-                    ""
-                ),
+                "review_text": review.review_text,
 
-                "sentiment": getattr(
-                    review,
-                    "sentiment",
-                    "neutral"
-                ),
+                "sentiment": review.sentiment,
 
-                "source": getattr(
-                    review,
-                    "source",
-                    "Google"
-                ),
+                "source": review.source,
 
-                "review_date": getattr(
-                    review,
-                    "review_date",
-                    None
-                ),
+                "review_date": review.review_date,
 
-                "created_at": getattr(
-                    review,
-                    "created_at",
-                    None
-                )
+                "created_at": review.created_at
             })
 
         logger.info(
@@ -312,15 +216,11 @@ async def get_company_reviews(
 
             "success": True,
 
-            "company_id": company.id,
+            "company_id": company_id,
 
             "company_name": company.name,
 
             "total_reviews": total_reviews,
-
-            "limit": limit,
-
-            "skip": skip,
 
             "reviews": response_reviews
         }
@@ -331,46 +231,41 @@ async def get_company_reviews(
     except Exception as e:
 
         logger.error(
-            f"GET COMPANY REVIEWS ERROR: {e}"
+            f"GET REVIEWS ERROR => {e}"
         )
 
         logger.error(traceback.format_exc())
 
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to fetch reviews: {str(e)}"
+            detail=str(e)
         )
 
 # =========================================================
-# MAIN GOOGLE REVIEW SYNC
+# SYNC ROUTE
 # =========================================================
+
 print("🔥 SYNC ROUTE REGISTERED 🔥")
+
 @router.post("/sync/{company_id}")
 async def sync_reviews(
     company_id: int,
     background_tasks: BackgroundTasks,
     force_refresh: bool = False,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user)
+    current_user=Depends(get_current_user)
 ):
 
-    """
-    GOOGLE REVIEW SYNC ROUTE
-
-    FRONTEND CALL:
-    POST /api/reviews/sync/17
-    """
-
-    print("SYNC ROUTE EXECUTED")
+    print("🚀 SYNC ROUTE EXECUTED")
 
     try:
 
         logger.info(
-            f"SYNC STARTED FOR COMPANY {company_id}"
+            f"SYNC STARTED => COMPANY {company_id}"
         )
 
         # =================================================
-        # COMPANY VALIDATION
+        # COMPANY CHECK
         # =================================================
 
         company = db.query(Company).filter(
@@ -379,17 +274,13 @@ async def sync_reviews(
 
         if not company:
 
-            logger.error(
-                f"COMPANY NOT FOUND => {company_id}"
-            )
-
             raise HTTPException(
                 status_code=404,
                 detail="Company not found"
             )
 
         # =================================================
-        # PLACE ID VALIDATION
+        # PLACE ID CHECK
         # =================================================
 
         google_place_id = getattr(
@@ -402,24 +293,18 @@ async def sync_reviews(
 
             return {
                 "success": False,
-                "message": "Google Place ID missing",
-                "company_id": company_id
+                "message": "Google Place ID missing"
             }
 
         # =================================================
-        # SCRAPER VALIDATION
+        # SCRAPER CHECK
         # =================================================
 
         if scrape_google_reviews is None:
 
-            logger.error(
-                "SCRAPER IMPORT FAILED"
-            )
-
             return {
                 "success": False,
-                "message": "scraper.py not connected",
-                "company_id": company_id
+                "message": "scraper.py import failed"
             }
 
         # =================================================
@@ -434,16 +319,15 @@ async def sync_reviews(
             google_place_id
         )
 
-        if not scraped_reviews:
+        print(
+            f"SCRAPED REVIEWS COUNT => {len(scraped_reviews)}"
+        )
 
-            logger.warning(
-                "NO REVIEWS RETURNED"
-            )
+        if not scraped_reviews:
 
             return {
                 "success": False,
                 "message": "No reviews fetched",
-                "company_id": company_id,
                 "inserted_reviews": 0
             }
 
@@ -472,15 +356,6 @@ async def sync_reviews(
                     "Anonymous"
                 )
 
-                rating = item.get(
-                    "rating",
-                    0
-                )
-
-                # =========================================
-                # DUPLICATE CHECK
-                # =========================================
-
                 existing_review = db.query(Review).filter(
                     and_(
                         Review.company_id == company_id,
@@ -494,17 +369,16 @@ async def sync_reviews(
                     duplicate_reviews += 1
                     continue
 
-                # =========================================
-                # CREATE REVIEW
-                # =========================================
-
                 review = Review(
 
                     company_id=company_id,
 
                     author=author,
 
-                    rating=rating,
+                    rating=item.get(
+                        "rating",
+                        0
+                    ),
 
                     review_text=review_text,
 
@@ -535,18 +409,18 @@ async def sync_reviews(
                 failed_reviews += 1
 
                 logger.error(
-                    f"FAILED REVIEW INSERT => {review_error}"
+                    f"REVIEW INSERT ERROR => {review_error}"
                 )
 
         # =================================================
-        # COMMIT DATABASE
+        # DATABASE COMMIT
         # =================================================
 
         db.commit()
 
         logger.info(
             f"""
-            REVIEW SYNC COMPLETED
+            REVIEW SYNC COMPLETE
 
             COMPANY: {company_id}
             INSERTED: {inserted_reviews}
@@ -565,8 +439,6 @@ async def sync_reviews(
             "company_id": company_id,
 
             "company_name": company.name,
-
-            "google_place_id": google_place_id,
 
             "inserted_reviews": inserted_reviews,
 
@@ -596,19 +468,15 @@ async def sync_reviews(
         )
 
 # =========================================================
-# REVIEW ANALYTICS
+# ANALYTICS
 # =========================================================
 
 @router.get("/analytics/{company_id}")
 async def review_analytics(
     company_id: int,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user)
+    current_user=Depends(get_current_user)
 ):
-
-    """
-    REVIEW ANALYTICS
-    """
 
     try:
 
@@ -632,52 +500,6 @@ async def review_analytics(
             2
         )
 
-        positive_reviews = len([
-            r for r in reviews
-            if getattr(r, "sentiment", "")
-            == "positive"
-        ])
-
-        negative_reviews = len([
-            r for r in reviews
-            if getattr(r, "sentiment", "")
-            == "negative"
-        ])
-
-        neutral_reviews = len([
-            r for r in reviews
-            if getattr(r, "sentiment", "")
-            == "neutral"
-        ])
-
-        rating_distribution = {
-
-            "1_star": len([
-                r for r in reviews
-                if r.rating == 1
-            ]),
-
-            "2_star": len([
-                r for r in reviews
-                if r.rating == 2
-            ]),
-
-            "3_star": len([
-                r for r in reviews
-                if r.rating == 3
-            ]),
-
-            "4_star": len([
-                r for r in reviews
-                if r.rating == 4
-            ]),
-
-            "5_star": len([
-                r for r in reviews
-                if r.rating == 5
-            ])
-        }
-
         return {
 
             "success": True,
@@ -686,15 +508,7 @@ async def review_analytics(
 
             "total_reviews": total_reviews,
 
-            "average_rating": average_rating,
-
-            "positive_reviews": positive_reviews,
-
-            "negative_reviews": negative_reviews,
-
-            "neutral_reviews": neutral_reviews,
-
-            "rating_distribution": rating_distribution
+            "average_rating": average_rating
         }
 
     except Exception as e:
@@ -703,11 +517,9 @@ async def review_analytics(
             f"ANALYTICS ERROR => {e}"
         )
 
-        logger.error(traceback.format_exc())
-
         raise HTTPException(
             status_code=500,
-            detail=f"Analytics failed: {str(e)}"
+            detail=str(e)
         )
 
 # =========================================================
@@ -719,12 +531,8 @@ async def latest_reviews(
     company_id: int,
     limit: int = 10,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user)
+    current_user=Depends(get_current_user)
 ):
-
-    """
-    GET LATEST REVIEWS
-    """
 
     try:
 
@@ -761,7 +569,7 @@ async def latest_reviews(
 
         raise HTTPException(
             status_code=500,
-            detail=f"Latest reviews failed: {str(e)}"
+            detail=str(e)
         )
 
 # =========================================================
@@ -772,12 +580,8 @@ async def latest_reviews(
 async def delete_review(
     review_id: int,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user)
+    current_user=Depends(get_current_user)
 ):
-
-    """
-    DELETE REVIEW
-    """
 
     try:
 
@@ -798,7 +602,7 @@ async def delete_review(
 
         return {
             "success": True,
-            "message": "Review deleted successfully"
+            "message": "Review deleted"
         }
 
     except HTTPException:
@@ -814,7 +618,7 @@ async def delete_review(
 
         raise HTTPException(
             status_code=500,
-            detail=f"Delete failed: {str(e)}"
+            detail=str(e)
         )
 
 # =========================================================
@@ -825,12 +629,8 @@ async def delete_review(
 async def review_stats(
     company_id: int,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user)
+    current_user=Depends(get_current_user)
 ):
-
-    """
-    REVIEW STATISTICS
-    """
 
     try:
 
@@ -844,12 +644,6 @@ async def review_stats(
             Review.company_id == company_id
         ).scalar()
 
-        latest_review = db.query(Review).filter(
-            Review.company_id == company_id
-        ).order_by(
-            desc(Review.review_date)
-        ).first()
-
         return {
 
             "success": True,
@@ -861,12 +655,6 @@ async def review_stats(
             "average_rating": round(
                 avg_rating or 0,
                 2
-            ),
-
-            "latest_review_date": getattr(
-                latest_review,
-                "review_date",
-                None
             )
         }
 
@@ -878,7 +666,7 @@ async def review_stats(
 
         raise HTTPException(
             status_code=500,
-            detail=f"Stats failed: {str(e)}"
+            detail=str(e)
         )
 
 # =========================================================
