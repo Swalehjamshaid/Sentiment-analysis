@@ -133,11 +133,69 @@ async def debug_routes():
 # GET COMPANY REVIEWS
 # =========================================================
 
+
+@router.get("/company/{company_id}")
 @router.get("/company/{company_id}")
 async def get_company_reviews(
     company_id: int,
     db: Session = Depends(get_db)
 ):
+
+    try:
+
+        reviews = db.query(Review).filter(
+            Review.company_id == company_id
+        ).all()
+
+        return {
+
+            "success": True,
+
+            "total_reviews": len(reviews),
+
+            "reviews": [
+
+                {
+                    "id": r.id,
+                    "author": r.author,
+                    "rating": r.rating,
+                    "review_text": r.review_text,
+                    "sentiment": r.sentiment
+                }
+
+                for r in reviews
+            ]
+        }
+
+    except Exception as e:
+
+        logger.error(
+            f"GET REVIEWS ERROR => {e}"
+        )
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
+
+# =========================================================
+# TEST ROUTE
+# =========================================================
+
+@router.get("/test-sync")
+async def test_sync():
+
+    return {
+        "success": True,
+        "message": "SYNC ROUTE REGISTERED"
+    }
+):@router.get("/test-sync")
+async def test_sync():
+
+    return {
+        "success": True,
+        "message": "SYNC ROUTE REGISTERED"
+    }
 
     try:
 
