@@ -27,16 +27,15 @@ from app.database import get_db
 # MODELS
 # =========================================================
 
-from app.models import (
-    Company,
-    Review
-)
+from app.models import Company, Review
 
 # =========================================================
 # LOGGER
 # =========================================================
 
 logger = logging.getLogger(__name__)
+
+print("🔥 REVIEWS ROUTER LOADED 🔥")
 
 # =========================================================
 # SCRAPER IMPORT
@@ -50,15 +49,13 @@ try:
 
     SCRAPER_AVAILABLE = True
 
-    logger.info(
-        "✅ SCRAPER IMPORTED SUCCESSFULLY"
-    )
+    print("✅ SCRAPER IMPORT SUCCESS")
 
 except Exception as scraper_error:
 
     scrape_google_reviews = None
 
-    logger.error(
+    print(
         f"❌ SCRAPER IMPORT FAILED => {scraper_error}"
     )
 
@@ -67,9 +64,7 @@ except Exception as scraper_error:
 # =========================================================
 
 router = APIRouter(
-
     prefix="/api/reviews",
-
     tags=["Reviews"]
 )
 
@@ -86,9 +81,11 @@ async def reviews_health():
 
         "service": "reviews",
 
+        "status": "healthy",
+
         "scraper_available": SCRAPER_AVAILABLE,
 
-        "timestamp": datetime.utcnow()
+        "timestamp": datetime.utcnow().isoformat()
     }
 
 # =========================================================
@@ -102,7 +99,9 @@ async def test_sync():
 
         "success": True,
 
-        "message": "TEST ROUTE WORKING"
+        "message": "TEST ROUTE WORKING",
+
+        "scraper_available": SCRAPER_AVAILABLE
     }
 
 # =========================================================
@@ -156,7 +155,7 @@ async def get_company_reviews(
         )
 
         # =================================================
-        # FILTERS
+        # FILTER BY RATING
         # =================================================
 
         if rating is not None:
@@ -164,6 +163,10 @@ async def get_company_reviews(
             query = query.filter(
                 Review.rating == rating
             )
+
+        # =================================================
+        # FILTER BY SENTIMENT
+        # =================================================
 
         if sentiment:
 
@@ -263,7 +266,7 @@ async def sync_reviews(
         )
 
         # =================================================
-        # COMPANY VALIDATION
+        # COMPANY CHECK
         # =================================================
 
         company = db.query(Company).filter(
@@ -280,7 +283,7 @@ async def sync_reviews(
             )
 
         # =================================================
-        # SCRAPER VALIDATION
+        # SCRAPER CHECK
         # =================================================
 
         if not SCRAPER_AVAILABLE:
@@ -296,12 +299,12 @@ async def sync_reviews(
             }
 
         # =================================================
-        # GOOGLE PLACE ID
+        # PLACE ID
         # =================================================
 
         google_place_id = getattr(
             company,
-            "place_id",
+            "google_place_id",
             None
         )
 
@@ -309,7 +312,7 @@ async def sync_reviews(
 
             google_place_id = getattr(
                 company,
-                "google_place_id",
+                "place_id",
                 None
             )
 
@@ -326,11 +329,11 @@ async def sync_reviews(
             }
 
         logger.info(
-            f"🌍 SCRAPING REVIEWS => {google_place_id}"
+            f"🌍 SCRAPING GOOGLE REVIEWS => {google_place_id}"
         )
 
         # =================================================
-        # SCRAPE REVIEWS
+        # SCRAPE
         # =================================================
 
         scraped_reviews = scrape_google_reviews(
@@ -348,7 +351,7 @@ async def sync_reviews(
 
                 "company_id": company_id,
 
-                "reviews_collected": 0
+                "inserted_reviews": 0
             }
 
         inserted_reviews = 0
@@ -468,7 +471,7 @@ async def sync_reviews(
                 )
 
         # =================================================
-        # COMMIT DATABASE
+        # DATABASE COMMIT
         # =================================================
 
         db.commit()
@@ -487,8 +490,6 @@ async def sync_reviews(
             "company_id": company_id,
 
             "company_name": company.name,
-
-            "reviews_collected": inserted_reviews,
 
             "inserted_reviews": inserted_reviews,
 
@@ -522,7 +523,7 @@ async def sync_reviews(
         )
 
 # =========================================================
-# ANALYTICS
+# REVIEW ANALYTICS
 # =========================================================
 
 @router.get("/analytics/{company_id}")
@@ -674,6 +675,33 @@ async def delete_review(
 
             detail=str(e)
         )
+
+# =========================================================
+# DEBUG ROUTE
+# =========================================================
+
+@router.get("/debug/routes")
+async def debug_routes():
+
+    return {
+
+        "success": True,
+
+        "routes": [
+
+            "/api/reviews/health",
+
+            "/api/reviews/test-sync",
+
+            "/api/reviews/company/{company_id}",
+
+            "/api/reviews/sync/{company_id}",
+
+            "/api/reviews/analytics/{company_id}",
+
+            "/api/reviews/delete/{review_id}"
+        ]
+    }
 
 # =========================================================
 # END OF FILE
