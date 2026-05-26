@@ -62,7 +62,7 @@ from datetime import datetime, timedelta
 import logging
 import traceback
 import asyncio
-
+print("🔥 ACTIVE REVIEWS.PY LOADED 🔥")
 # =========================================================
 # DATABASE IMPORTS
 # =========================================================
@@ -345,7 +345,7 @@ async def get_company_reviews(
 # =========================================================
 # MAIN GOOGLE REVIEW SYNC
 # =========================================================
-
+print("🔥 SYNC ROUTE REGISTERED 🔥")
 @router.post("/sync/{company_id}")
 async def sync_reviews(
     company_id: int,
