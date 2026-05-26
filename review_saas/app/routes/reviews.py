@@ -56,7 +56,17 @@ try:
         "🔥 TRYING TO IMPORT SCRAPER"
     )
 
-from app.services.scraper import scrape_google_reviews
+    from app.services.scraper import scrape_google_reviews
+
+    SCRAPER_AVAILABLE = True
+
+    print(
+        "✅ SCRAPER IMPORTED SUCCESSFULLY"
+    )
+
+    print(
+        f"🔥 SCRAPER FUNCTION => {scrape_google_reviews}"
+    )
 
     SCRAPER_AVAILABLE = True
 
