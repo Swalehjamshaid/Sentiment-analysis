@@ -129,109 +129,47 @@ async def debug_routes():
 # GET COMPANY REVIEWS
 # =========================================================
 
+# =========================================================
+# GET COMPANY REVIEWS
+# =========================================================
+
 @router.get("/company/{company_id}")
 async def get_company_reviews(
     company_id: int,
-    limit: int = Query(100, ge=1, le=1000),
-    skip: int = Query(0, ge=0),
-    rating: Optional[int] = None,
-    sentiment: Optional[str] = None,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user)
+    db: Session = Depends(get_db)
 ):
 
     try:
 
-        logger.info(
-            f"FETCHING REVIEWS => COMPANY {company_id}"
-        )
-
-        company = db.query(Company).filter(
-            Company.id == company_id
-        ).first()
-
-        if not company:
-
-            raise HTTPException(
-                status_code=404,
-                detail="Company not found"
-            )
-
-        query = db.query(Review).filter(
+        reviews = db.query(Review).filter(
             Review.company_id == company_id
-        )
-
-        if rating:
-
-            query = query.filter(
-                Review.rating == rating
-            )
-
-        if sentiment:
-
-            query = query.filter(
-                func.lower(Review.sentiment)
-                == sentiment.lower()
-            )
-
-        total_reviews = query.count()
-
-        reviews = query.order_by(
-            desc(Review.created_at)
-        ).offset(skip).limit(limit).all()
-
-        response_reviews = []
-
-        for review in reviews:
-
-            response_reviews.append({
-
-                "id": review.id,
-
-                "company_id": review.company_id,
-
-                "author": review.author,
-
-                "rating": review.rating,
-
-                "review_text": review.review_text,
-
-                "sentiment": review.sentiment,
-
-                "source": review.source,
-
-                "review_date": review.review_date,
-
-                "created_at": review.created_at
-            })
-
-        logger.info(
-            f"REVIEWS FETCHED => {len(response_reviews)}"
-        )
+        ).all()
 
         return {
 
             "success": True,
 
-            "company_id": company_id,
+            "total_reviews": len(reviews),
 
-            "company_name": company.name,
+            "reviews": [
 
-            "total_reviews": total_reviews,
+                {
+                    "id": r.id,
+                    "author": r.author,
+                    "rating": r.rating,
+                    "review_text": r.review_text,
+                    "sentiment": r.sentiment
+                }
 
-            "reviews": response_reviews
+                for r in reviews
+            ]
         }
-
-    except HTTPException:
-        raise
 
     except Exception as e:
 
         logger.error(
             f"GET REVIEWS ERROR => {e}"
         )
-
-        logger.error(traceback.format_exc())
 
         raise HTTPException(
             status_code=500,
