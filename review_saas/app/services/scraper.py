@@ -1,6 +1,6 @@
 # =========================================================
 # FILE: app/scraper.py
-# TRUSTLYTICS AI - ULTRA ENTERPRISE REVIEW SCRAPER
+# TRUSTLYTICS AI - ULTRA ENTERPRISE GOOGLE REVIEW SCRAPER
 # =========================================================
 
 from __future__ import annotations
@@ -42,7 +42,10 @@ logger.setLevel(logging.INFO)
 # ENVIRONMENT VARIABLES
 # =========================================================
 
-SERPAPI_KEY = os.getenv("SERPAPI_KEY", "").strip()
+SERPAPI_KEY = os.getenv(
+    "SERPAPI_KEY",
+    ""
+).strip()
 
 PROXY_USERNAME = os.getenv(
     "PROXY_USERNAME",
@@ -349,6 +352,23 @@ def generate_review_id(
     ).hexdigest()
 
 # =========================================================
+# EMPTY RESULT RETRY VALIDATOR
+# =========================================================
+
+def validate_reviews_result(
+    reviews,
+    provider_name="UNKNOWN"
+):
+
+    if not reviews:
+
+        raise Exception(
+            f"{provider_name} returned 0 reviews"
+        )
+
+    return reviews
+
+# =========================================================
 # SIMPLE SENTIMENT
 # =========================================================
 
@@ -642,11 +662,18 @@ def serpapi_reviews(
 
                 reviews.append(review)
 
+        validate_reviews_result(
+            reviews,
+            "SERPAPI"
+        )
+
     except Exception as e:
 
         logger.error(
             f"❌ SERPAPI ERROR => {e}"
         )
+
+        raise
 
     logger.info(
         f"✅ SERPAPI REVIEWS => {len(reviews)}"
@@ -795,10 +822,6 @@ async def playwright_reviews(
                     except Exception:
 
                         pass
-
-                # =====================================================
-                # CONTINUOUS SCROLLING
-                # =====================================================
 
                 start_time = time.time()
 
@@ -1021,6 +1044,11 @@ async def playwright_reviews(
                             f"❌ PLAYWRIGHT PARSE ERROR => {parse_error}"
                         )
 
+                validate_reviews_result(
+                    reviews,
+                    "PLAYWRIGHT"
+                )
+
                 await browser.close()
 
                 break
@@ -1049,212 +1077,6 @@ async def playwright_reviews(
 
     logger.info(
         f"✅ PLAYWRIGHT REVIEWS => {len(reviews)}"
-    )
-
-    return reviews
-
-# =========================================================
-# CURL_CFFI
-# =========================================================
-
-@retry(
-    stop=stop_after_attempt(MAX_RETRIES),
-    wait=wait_random_exponential(
-        min=2,
-        max=12
-    ),
-    reraise=True
-)
-def curl_reviews(
-    place_id: str
-):
-
-    logger.info(
-        "🚀 CURL_CFFI STARTED"
-    )
-
-    reviews = []
-
-    if not ENABLE_CURL:
-
-        return reviews
-
-    if not CURL_AVAILABLE:
-
-        return reviews
-
-    try:
-
-        session = CurlSession()
-
-        response = session.get(
-
-            maps_url(place_id),
-
-            impersonate="chrome124",
-
-            proxies={
-
-                "http":
-                    PROXY_URL,
-
-                "https":
-                    PROXY_URL
-
-            } if PROXY_URL else None,
-
-            headers={
-
-                "User-Agent":
-                    get_user_agent(),
-
-                "Accept-Language":
-                    "en-US,en;q=0.9",
-
-                "Accept":
-                    "text/html,application/xhtml+xml",
-
-                "Referer":
-                    "https://www.google.com/"
-            },
-
-            timeout=SCRAPER_TIMEOUT
-        )
-
-        parser = HTMLParser(
-            response.text
-        )
-
-        nodes = parser.css(
-            ".wiI7pd"
-        )
-
-        logger.info(
-            f"CURL NODES => {len(nodes)}"
-        )
-
-        for node in nodes:
-
-            review = normalize_review({
-
-                "author":
-                    "Google User",
-
-                "rating":
-                    5,
-
-                "review_text":
-                    node.text(),
-
-                "source":
-                    "CURL_CFFI"
-
-            }, place_id)
-
-            if review:
-
-                reviews.append(review)
-
-    except Exception as e:
-
-        logger.error(
-            f"❌ CURL ERROR => {e}"
-        )
-
-    logger.info(
-        f"✅ CURL REVIEWS => {len(reviews)}"
-    )
-
-    return reviews
-
-# =========================================================
-# CRAWL4AI
-# =========================================================
-
-@backoff.on_exception(
-
-    backoff.expo,
-
-    Exception,
-
-    max_time=MAX_PROVIDER_RUNTIME
-)
-async def crawl4ai_reviews(
-    place_id: str
-):
-
-    logger.info(
-        "🚀 CRAWL4AI STARTED"
-    )
-
-    reviews = []
-
-    if not ENABLE_CRAWL4AI:
-
-        return reviews
-
-    if not CRAWL4AI_AVAILABLE:
-
-        return reviews
-
-    try:
-
-        async with AsyncWebCrawler() as crawler:
-
-            result = await crawler.arun(
-
-                url=maps_url(place_id)
-            )
-
-            html = getattr(
-                result,
-                "html",
-                ""
-            )
-
-            soup = BeautifulSoup(
-                html,
-                "html.parser"
-            )
-
-            blocks = soup.select(
-                ".wiI7pd"
-            )
-
-            logger.info(
-                f"CRAWL4AI BLOCKS => {len(blocks)}"
-            )
-
-            for block in blocks:
-
-                review = normalize_review({
-
-                    "author":
-                        "Google User",
-
-                    "rating":
-                        5,
-
-                    "review_text":
-                        block.text.strip(),
-
-                    "source":
-                        "CRAWL4AI"
-
-                }, place_id)
-
-                if review:
-
-                    reviews.append(review)
-
-    except Exception as e:
-
-        logger.error(
-            f"❌ CRAWL4AI ERROR => {e}"
-        )
-
-    logger.info(
-        f"✅ CRAWL4AI REVIEWS => {len(reviews)}"
     )
 
     return reviews
@@ -1302,28 +1124,15 @@ async def scrape_google_reviews(
                 )
             )
 
-        if ENABLE_CURL:
-
-            tasks.append(
-                asyncio.to_thread(
-                    curl_reviews,
-                    place_id
-                )
-            )
-
-        if ENABLE_CRAWL4AI:
-
-            tasks.append(
-                crawl4ai_reviews(
-                    place_id
-                )
-            )
-
         results = await asyncio.gather(
 
             *tasks,
 
             return_exceptions=True
+        )
+
+        logger.info(
+            f"PROVIDER RESULTS => {results}"
         )
 
         for result in results:
