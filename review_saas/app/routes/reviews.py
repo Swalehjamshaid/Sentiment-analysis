@@ -103,6 +103,40 @@ def serialize_datetime(value):
     return value
 
 
+def normalize_datetime(value):
+
+    if isinstance(value, datetime):
+        return value
+
+    return datetime.utcnow()
+
+
+def safe_float(value, default=0.5):
+
+    try:
+        return float(value)
+
+    except Exception:
+        return default
+
+
+def safe_rating(value, default=5):
+
+    try:
+        rating = int(float(value))
+
+    except Exception:
+        rating = default
+
+    if rating < 1:
+        rating = 1
+
+    if rating > 5:
+        rating = 5
+
+    return rating
+
+
 def generate_google_review_id(
     company_id: int,
     author: str,
@@ -133,6 +167,58 @@ async def run_scraper(
     return result or []
 
 
+def build_sync_response(
+    success: bool,
+    message: str,
+    company_id: int,
+    company_name: Optional[str] = None,
+    inserted_reviews: int = 0,
+    duplicate_reviews: int = 0,
+    failed_reviews: int = 0,
+    scraped_reviews=None,
+):
+
+    scraped_reviews = scraped_reviews or []
+
+    total_scraped = len(scraped_reviews)
+
+    return {
+
+        "success": success,
+
+        "message": message,
+
+        "company_id": company_id,
+
+        "company_name": company_name,
+
+        "inserted_reviews": inserted_reviews,
+
+        "duplicate_reviews": duplicate_reviews,
+
+        "failed_reviews": failed_reviews,
+
+        "total_scraped": total_scraped,
+
+        "scraped_reviews": scraped_reviews,
+
+        # Frontend compatibility aliases
+        "reviews_collected": inserted_reviews,
+
+        "reviewsCollected": inserted_reviews,
+
+        "insertedReviews": inserted_reviews,
+
+        "duplicateReviews": duplicate_reviews,
+
+        "failedReviews": failed_reviews,
+
+        "totalScraped": total_scraped,
+
+        "scrapedReviews": scraped_reviews
+    }
+
+
 # =========================================================
 # HEALTH ROUTE
 # =========================================================
@@ -153,6 +239,7 @@ async def reviews_health():
         "timestamp": datetime.utcnow().isoformat()
     }
 
+
 # =========================================================
 # TEST ROUTE
 # =========================================================
@@ -168,6 +255,7 @@ async def test_sync():
 
         "scraper_available": SCRAPER_AVAILABLE
     }
+
 
 # =========================================================
 # DEBUG ROUTES
@@ -195,6 +283,7 @@ async def debug_routes():
             "/api/reviews/delete/{review_id}"
         ]
     }
+
 
 # =========================================================
 # GET COMPANY REVIEWS
@@ -296,11 +385,15 @@ async def get_company_reviews(
 
                 "author": review.author_name,
 
+                "author_name": review.author_name,
+
                 "rating": review.rating,
 
                 "content": review.text,
 
                 "review_text": review.text,
+
+                "text": review.text,
 
                 "sentiment_score":
                     review.sentiment_score,
@@ -353,6 +446,7 @@ async def get_company_reviews(
             detail=str(e)
         )
 
+
 # =========================================================
 # SYNC REVIEWS
 # =========================================================
@@ -392,15 +486,16 @@ async def sync_reviews(
 
         if not SCRAPER_AVAILABLE:
 
-            return {
+            return build_sync_response(
 
-                "success": False,
+                success=False,
 
-                "message":
-                    "scraper.py import failed",
+                message="scraper.py import failed",
 
-                "company_id": company_id
-            }
+                company_id=company_id,
+
+                company_name=company.name
+            )
 
         google_place_id = getattr(
             company,
@@ -410,15 +505,16 @@ async def sync_reviews(
 
         if not google_place_id:
 
-            return {
+            return build_sync_response(
 
-                "success": False,
+                success=False,
 
-                "message":
-                    "Google Place ID missing",
+                message="Google Place ID missing",
 
-                "company_id": company_id
-            }
+                company_id=company_id,
+
+                company_name=company.name
+            )
 
         logger.info(
             f"🌍 SCRAPING REVIEWS => {google_place_id}"
@@ -430,17 +526,18 @@ async def sync_reviews(
 
         if not scraped_reviews:
 
-            return {
+            return build_sync_response(
 
-                "success": False,
+                success=False,
 
-                "message":
-                    "No reviews fetched",
+                message="No reviews fetched",
 
-                "company_id": company_id,
+                company_id=company_id,
 
-                "inserted_reviews": 0
-            }
+                company_name=company.name,
+
+                scraped_reviews=[]
+            )
 
         inserted_reviews = 0
         duplicate_reviews = 0
@@ -457,7 +554,11 @@ async def sync_reviews(
 
                         item.get(
                             "content",
-                            ""
+
+                            item.get(
+                                "text",
+                                ""
+                            )
                         )
                     )
 
@@ -470,30 +571,24 @@ async def sync_reviews(
                     continue
 
                 author = str(
+
                     item.get(
                         "author",
-                        "Anonymous"
-                    )
-                ).strip() or "Anonymous"
 
-                try:
-
-                    rating = int(
                         item.get(
-                            "rating",
-                            0
+                            "author_name",
+                            "Anonymous"
                         )
                     )
 
-                except Exception:
+                ).strip() or "Anonymous"
 
-                    rating = 0
-
-                if rating < 0:
-                    rating = 0
-
-                if rating > 5:
-                    rating = 5
+                rating = safe_rating(
+                    item.get(
+                        "rating",
+                        5
+                    )
+                )
 
                 duplicate_result = await db.execute(
 
@@ -524,16 +619,28 @@ async def sync_reviews(
 
                     continue
 
+                google_review_id = str(
+
+                    item.get(
+                        "google_review_id",
+                        ""
+                    )
+
+                ).strip()
+
+                if not google_review_id:
+
+                    google_review_id = generate_google_review_id(
+                        company_id,
+                        author,
+                        review_text
+                    )
+
                 review = Review(
 
                     company_id=company_id,
 
-                    google_review_id=
-                        generate_google_review_id(
-                            company_id,
-                            author,
-                            review_text
-                        ),
+                    google_review_id=google_review_id,
 
                     author_name=author,
 
@@ -541,9 +648,19 @@ async def sync_reviews(
 
                     text=review_text,
 
-                    sentiment_score=0.5,
+                    sentiment_score=safe_float(
+                        item.get(
+                            "sentiment_score",
+                            0.5
+                        ),
+                        0.5
+                    ),
 
-                    google_review_time=datetime.utcnow(),
+                    google_review_time=normalize_datetime(
+                        item.get(
+                            "google_review_time"
+                        )
+                    ),
 
                     created_at=datetime.utcnow()
                 )
@@ -570,25 +687,24 @@ async def sync_reviews(
             f"✅ SYNC COMPLETE => {inserted_reviews}"
         )
 
-        return {
+        return build_sync_response(
 
-            "success": True,
+            success=True,
 
-            "message":
-                "Reviews synced successfully",
+            message="Reviews synced successfully",
 
-            "company_id": company_id,
+            company_id=company_id,
 
-            "company_name": company.name,
+            company_name=company.name,
 
-            "inserted_reviews": inserted_reviews,
+            inserted_reviews=inserted_reviews,
 
-            "duplicate_reviews": duplicate_reviews,
+            duplicate_reviews=duplicate_reviews,
 
-            "failed_reviews": failed_reviews,
+            failed_reviews=failed_reviews,
 
-            "total_scraped": len(scraped_reviews)
-        }
+            scraped_reviews=scraped_reviews
+        )
 
     except HTTPException:
         raise
@@ -611,6 +727,7 @@ async def sync_reviews(
 
             detail=str(e)
         )
+
 
 # =========================================================
 # ANALYTICS
@@ -709,6 +826,7 @@ async def review_analytics(
             detail=str(e)
         )
 
+
 # =========================================================
 # DELETE REVIEW
 # =========================================================
@@ -775,6 +893,7 @@ async def delete_review(
 
             detail=str(e)
         )
+
 
 # =========================================================
 # ROUTER READY
