@@ -1,25 +1,42 @@
 # =========================================================
 # FILE: app/scraper.py
-# TRUSTLYTICS AI - ULTRA ENTERPRISE GOOGLE REVIEW SCRAPER
-# FULLY STABILIZED PRODUCTION VERSION
+# TRUSTLYTICS AI - ENTERPRISE GOOGLE REVIEW SCRAPER
+# FULLY DEBUGGED + FULL VISIBILITY VERSION
 # =========================================================
+
 from __future__ import annotations
+
 print("🔥 SCRAPER.PY LOADED")
+
+# =========================================================
+# STANDARD LIBRARIES
+# =========================================================
+
 import os
 import re
 import json
 import time
-import asyncio
-import logging
-import traceback
 import random
+import asyncio
 import hashlib
+import traceback
+import logging
 
 from datetime import datetime
 from typing import List, Dict, Any
 
+print("✅ STANDARD LIBRARIES IMPORTED")
+
 # =========================================================
-# RETRY LIBRARIES
+# REQUESTS
+# =========================================================
+
+import requests
+
+print("✅ REQUESTS IMPORTED")
+
+# =========================================================
+# TENACITY
 # =========================================================
 
 from tenacity import (
@@ -28,7 +45,93 @@ from tenacity import (
     wait_random_exponential
 )
 
+print("✅ TENACITY IMPORTED")
+
+# =========================================================
+# BACKOFF
+# =========================================================
+
 import backoff
+
+print("✅ BACKOFF IMPORTED")
+
+# =========================================================
+# BS4
+# =========================================================
+
+BS4_AVAILABLE = False
+
+try:
+
+    from bs4 import BeautifulSoup
+
+    BS4_AVAILABLE = True
+
+    print("✅ BS4 IMPORTED")
+
+except Exception as e:
+
+    print(f"❌ BS4 IMPORT ERROR => {e}")
+
+# =========================================================
+# PLAYWRIGHT
+# =========================================================
+
+PLAYWRIGHT_AVAILABLE = False
+
+try:
+
+    from playwright.async_api import (
+        async_playwright
+    )
+
+    PLAYWRIGHT_AVAILABLE = True
+
+    print("✅ PLAYWRIGHT IMPORTED")
+
+except Exception as e:
+
+    print(f"❌ PLAYWRIGHT IMPORT ERROR => {e}")
+
+# =========================================================
+# PLAYWRIGHT STEALTH
+# =========================================================
+
+STEALTH_AVAILABLE = False
+
+try:
+
+    from playwright_stealth import stealth_async
+
+    STEALTH_AVAILABLE = True
+
+    print("✅ PLAYWRIGHT STEALTH IMPORTED")
+
+except Exception as e:
+
+    print(f"❌ PLAYWRIGHT STEALTH IMPORT ERROR => {e}")
+
+# =========================================================
+# FAKE USER AGENT
+# =========================================================
+
+FAKE_UA_AVAILABLE = False
+
+try:
+
+    from fake_useragent import UserAgent
+
+    fake_ua = UserAgent()
+
+    FAKE_UA_AVAILABLE = True
+
+    print("✅ FAKE USER AGENT IMPORTED")
+
+except Exception as e:
+
+    print(f"❌ FAKE USER AGENT ERROR => {e}")
+
+    fake_ua = None
 
 # =========================================================
 # LOGGER
@@ -37,6 +140,8 @@ import backoff
 logger = logging.getLogger(__name__)
 
 logger.setLevel(logging.INFO)
+
+print("✅ LOGGER READY")
 
 # =========================================================
 # ENVIRONMENT VARIABLES
@@ -76,20 +181,6 @@ MAX_REVIEWS = int(
     )
 )
 
-MAX_RETRIES = int(
-    os.getenv(
-        "SCRAPER_MAX_RETRIES",
-        "5"
-    )
-)
-
-MAX_PROVIDER_RUNTIME = int(
-    os.getenv(
-        "SCRAPER_PROVIDER_RUNTIME",
-        "120"
-    )
-)
-
 ENABLE_SERPAPI = os.getenv(
     "ENABLE_SERPAPI_SCRAPER",
     "true"
@@ -100,104 +191,7 @@ ENABLE_PLAYWRIGHT = os.getenv(
     "true"
 ).lower() == "true"
 
-# =========================================================
-# PROXY
-# =========================================================
-
-PROXY_URL = ""
-
-if (
-    PROXY_USERNAME and
-    PROXY_PASSWORD and
-    PROXY_SERVER
-):
-
-    PROXY_URL = (
-        f"http://{PROXY_USERNAME}:"
-        f"{PROXY_PASSWORD}@"
-        f"{PROXY_SERVER}"
-    )
-
-# =========================================================
-# OPTIONAL IMPORTS
-# =========================================================
-
-PLAYWRIGHT_AVAILABLE = False
-STEALTH_AVAILABLE = False
-BS4_AVAILABLE = False
-FAKE_UA_AVAILABLE = False
-
-# =========================================================
-# REQUESTS
-# =========================================================
-
-import requests
-
-# =========================================================
-# BEAUTIFULSOUP
-# =========================================================
-
-try:
-
-    from bs4 import BeautifulSoup
-
-    BS4_AVAILABLE = True
-
-except Exception as e:
-
-    print(f"❌ BS4 IMPORT ERROR => {e}")
-
-# =========================================================
-# PLAYWRIGHT
-# =========================================================
-
-try:
-
-    from playwright.async_api import (
-        async_playwright
-    )
-
-    PLAYWRIGHT_AVAILABLE = True
-
-    print("✅ PLAYWRIGHT IMPORTED")
-
-except Exception as e:
-
-    print(f"❌ PLAYWRIGHT IMPORT ERROR => {e}")
-
-# =========================================================
-# PLAYWRIGHT STEALTH
-# =========================================================
-
-try:
-
-    from playwright_stealth import stealth_async
-
-    STEALTH_AVAILABLE = True
-
-    print("✅ PLAYWRIGHT STEALTH IMPORTED")
-
-except Exception as e:
-
-    print(f"❌ STEALTH IMPORT ERROR => {e}")
-
-# =========================================================
-# FAKE USER AGENT
-# =========================================================
-
-try:
-
-    from fake_useragent import UserAgent
-
-    fake_ua = UserAgent()
-
-    FAKE_UA_AVAILABLE = True
-
-except Exception as e:
-
-    print(f"❌ FAKE USER AGENT ERROR => {e}")
-
-    fake_ua = None
+print("✅ ENVIRONMENT VARIABLES LOADED")
 
 # =========================================================
 # HELPERS
@@ -236,8 +230,8 @@ def get_user_agent():
 # =========================================================
 
 async def human_delay(
-    minimum=3,
-    maximum=8
+    minimum=5,
+    maximum=10
 ):
 
     await asyncio.sleep(
@@ -272,23 +266,6 @@ def generate_review_id(
     return hashlib.sha256(
         raw.encode()
     ).hexdigest()
-
-# =========================================================
-# VALIDATE RESULT
-# =========================================================
-
-def validate_reviews_result(
-    reviews,
-    provider_name="UNKNOWN"
-):
-
-    if not reviews:
-
-        raise Exception(
-            f"{provider_name} returned 0 reviews"
-        )
-
-    return reviews
 
 # =========================================================
 # NORMALIZE REVIEW
@@ -403,11 +380,11 @@ def deduplicate_reviews(
     return unique_reviews
 
 # =========================================================
-# SERPAPI
+# SERPAPI SCRAPER
 # =========================================================
 
 @retry(
-    stop=stop_after_attempt(MAX_RETRIES),
+    stop=stop_after_attempt(5),
     wait=wait_random_exponential(
         min=2,
         max=20
@@ -423,6 +400,8 @@ def serpapi_reviews(
     reviews = []
 
     if not ENABLE_SERPAPI:
+
+        print("⚠️ SERPAPI DISABLED")
 
         return reviews
 
@@ -450,6 +429,10 @@ def serpapi_reviews(
             timeout=SCRAPER_TIMEOUT
         )
 
+        print(
+            f"🔥 SERPAPI STATUS => {response.status_code}"
+        )
+
         data = response.json()
 
         raw_reviews = data.get(
@@ -458,7 +441,7 @@ def serpapi_reviews(
         )
 
         print(
-            f"🔥 SERPAPI RAW => {len(raw_reviews)}"
+            f"🔥 SERPAPI RAW REVIEWS => {len(raw_reviews)}"
         )
 
         for item in raw_reviews:
@@ -489,16 +472,11 @@ def serpapi_reviews(
 
                 reviews.append(review)
 
-        validate_reviews_result(
-            reviews,
-            "SERPAPI"
-        )
-
     except Exception as e:
 
         print(f"❌ SERPAPI ERROR => {e}")
 
-        raise
+        print(traceback.format_exc())
 
     print(
         f"✅ SERPAPI REVIEWS => {len(reviews)}"
@@ -507,16 +485,13 @@ def serpapi_reviews(
     return reviews
 
 # =========================================================
-# PLAYWRIGHT
+# PLAYWRIGHT SCRAPER
 # =========================================================
 
 @backoff.on_exception(
-
     backoff.expo,
-
     Exception,
-
-    max_time=MAX_PROVIDER_RUNTIME
+    max_time=120
 )
 async def playwright_reviews(
     place_id: str
@@ -566,11 +541,11 @@ async def playwright_reviews(
 
                     "--single-process",
 
-                    "--disable-background-networking",
-
                     "--window-size=1920,1080"
                 ]
             )
+
+            print("✅ CHROMIUM STARTED")
 
             context = await browser.new_context(
 
@@ -579,9 +554,7 @@ async def playwright_reviews(
                 locale="en-US",
 
                 viewport={
-
                     "width": 1920,
-
                     "height": 1080
                 }
             )
@@ -591,6 +564,8 @@ async def playwright_reviews(
             if STEALTH_AVAILABLE:
 
                 await stealth_async(page)
+
+                print("✅ STEALTH ENABLED")
 
             target_url = maps_url(
                 place_id
@@ -611,10 +586,6 @@ async def playwright_reviews(
 
             print(
                 f"🔥 PAGE URL => {page.url}"
-            )
-
-            print(
-                "🔥 WAITING FOR GOOGLE RENDER"
             )
 
             await human_delay(
@@ -646,7 +617,7 @@ async def playwright_reviews(
                     clicked = True
 
                     print(
-                        f"✅ CLICKED => {selector}"
+                        f"✅ REVIEW BUTTON CLICKED => {selector}"
                     )
 
                     break
@@ -666,13 +637,13 @@ async def playwright_reviews(
                 20
             )
 
-            start_time = time.time()
+            stable_rounds = 0
 
             last_review_count = 0
 
-            stable_rounds = 0
-
             all_review_blocks = []
+
+            start_time = time.time()
 
             while True:
 
@@ -681,7 +652,7 @@ async def playwright_reviews(
                 if elapsed > 120:
 
                     print(
-                        "⏰ MAX SCRAPER TIME REACHED"
+                        "⏰ MAX TIME REACHED"
                     )
 
                     break
@@ -724,9 +695,7 @@ async def playwright_reviews(
 
                     ".wiI7pd",
 
-                    ".MyEned",
-
-                    "div.section-review-content"
+                    ".MyEned"
                 ]
 
                 current_blocks = []
@@ -755,24 +724,8 @@ async def playwright_reviews(
                             f"❌ SELECTOR ERROR => {selector_error}"
                         )
 
-                unique_html = set()
-
-                deduped_blocks = []
-
-                for block in current_blocks:
-
-                    block_html = str(block)
-
-                    if block_html in unique_html:
-
-                        continue
-
-                    unique_html.add(block_html)
-
-                    deduped_blocks.append(block)
-
                 current_count = len(
-                    deduped_blocks
+                    current_blocks
                 )
 
                 print(
@@ -783,17 +736,13 @@ async def playwright_reviews(
 
                     stable_rounds += 1
 
-                    print(
-                        f"⚠️ NO NEW REVIEWS => {stable_rounds}"
-                    )
-
                 else:
 
                     stable_rounds = 0
 
                 last_review_count = current_count
 
-                all_review_blocks = deduped_blocks
+                all_review_blocks = current_blocks
 
                 if stable_rounds >= 15:
 
@@ -806,18 +755,16 @@ async def playwright_reviews(
                 if current_count >= MAX_REVIEWS:
 
                     print(
-                        f"🎯 TARGET REACHED => {current_count}"
+                        "🎯 MAX REVIEWS REACHED"
                     )
 
                     break
 
-            review_blocks = all_review_blocks
-
             print(
-                f"🔥 FINAL BLOCKS => {len(review_blocks)}"
+                f"🔥 FINAL BLOCKS => {len(all_review_blocks)}"
             )
 
-            for block in review_blocks:
+            for block in all_review_blocks:
 
                 try:
 
@@ -888,11 +835,6 @@ async def playwright_reviews(
                         f"❌ PARSE ERROR => {parse_error}"
                     )
 
-            validate_reviews_result(
-                reviews,
-                "PLAYWRIGHT"
-            )
-
     except Exception as e:
 
         print(
@@ -910,6 +852,8 @@ async def playwright_reviews(
             if browser:
 
                 await browser.close()
+
+                print("✅ BROWSER CLOSED")
 
         except Exception:
 
@@ -986,9 +930,7 @@ async def scrape_google_reviews(
             all_reviews
         )
 
-        if MAX_REVIEWS > 0:
-
-            all_reviews = all_reviews[:MAX_REVIEWS]
+        all_reviews = all_reviews[:MAX_REVIEWS]
 
         print(
             f"✅ FINAL UNIQUE REVIEWS => {len(all_reviews)}"
@@ -1021,27 +963,7 @@ async def run_scraper(
     )
 
 # =========================================================
-# TEST
+# FINAL LOADED
 # =========================================================
 
-if __name__ == "__main__":
-
-    async def main():
-
-        place_id = (
-            "ChIJN1t_tDeuEmsRUsoyG83frY4"
-        )
-
-        reviews = await scrape_google_reviews(
-            place_id
-        )
-
-        print(
-            json.dumps(
-                reviews[:5],
-                indent=4,
-                default=str
-            )
-        )
-
-    asyncio.run(main())
+print("✅ SCRAPER.PY FULLY LOADED")
