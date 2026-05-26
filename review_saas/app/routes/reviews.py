@@ -11,19 +11,13 @@ from fastapi import (
 )
 
 from sqlalchemy.orm import Session
-from sqlalchemy import desc, func, and_
+from sqlalchemy import func, desc, and_
 
 from typing import Optional
 from datetime import datetime
 
 import logging
 import traceback
-
-# =========================================================
-# DEBUG
-# =========================================================
-
-print("🔥 ACTIVE REVIEWS.PY LOADED 🔥")
 
 # =========================================================
 # DATABASE
@@ -54,14 +48,16 @@ try:
 
     from app.scraper import scrape_google_reviews
 
-    print("✅ SCRAPER IMPORT SUCCESS")
+    SCRAPER_AVAILABLE = True
 
 except Exception as scraper_error:
 
     scrape_google_reviews = None
 
+    SCRAPER_AVAILABLE = False
+
     print(
-        f"❌ SCRAPER IMPORT FAILED: {scraper_error}"
+        f"❌ SCRAPER IMPORT FAILED => {scraper_error}"
     )
 
 # =========================================================
@@ -80,7 +76,7 @@ router = APIRouter(
 )
 
 # =========================================================
-# HEALTH ROUTE
+# HEALTH CHECK
 # =========================================================
 
 @router.get("/health")
@@ -88,14 +84,14 @@ async def review_health():
 
     return {
         "success": True,
-        "message": "reviews.py working",
+        "message": "reviews router working",
+        "scraper_available": SCRAPER_AVAILABLE,
         "timestamp": datetime.utcnow()
     }
 
 # =========================================================
 # TEST ROUTE
 # =========================================================
-
 
 @router.get("/test-sync")
 async def test_sync():
@@ -113,15 +109,26 @@ async def test_sync():
 async def debug_routes():
 
     return {
+
         "success": True,
+
         "routes": [
+
             "GET /api/reviews/health",
+
+            "GET /api/reviews/test-sync",
+
             "GET /api/reviews/company/{company_id}",
+
             "POST /api/reviews/sync/{company_id}",
-            "GET /api/reviews/analytics/{company_id}",
+
             "GET /api/reviews/latest/{company_id}",
-            "DELETE /api/reviews/delete/{review_id}",
-            "GET /api/reviews/stats/{company_id}"
+
+            "GET /api/reviews/analytics/{company_id}",
+
+            "GET /api/reviews/stats/{company_id}",
+
+            "DELETE /api/reviews/delete/{review_id}"
         ]
     }
 
@@ -129,48 +136,106 @@ async def debug_routes():
 # GET COMPANY REVIEWS
 # =========================================================
 
-# =========================================================
-# GET COMPANY REVIEWS
-# =========================================================
-
-
-@router.get("/company/{company_id}")
 @router.get("/company/{company_id}")
 async def get_company_reviews(
     company_id: int,
-    db: Session = Depends(get_db)
+    limit: int = Query(100, ge=1, le=1000),
+    skip: int = Query(0, ge=0),
+    rating: Optional[int] = None,
+    sentiment: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user)
 ):
 
     try:
 
-        reviews = db.query(Review).filter(
+        company = db.query(Company).filter(
+            Company.id == company_id
+        ).first()
+
+        if not company:
+
+            raise HTTPException(
+                status_code=404,
+                detail="Company not found"
+            )
+
+        query = db.query(Review).filter(
             Review.company_id == company_id
-        ).all()
+        )
+
+        # =================================================
+        # OPTIONAL FILTERS
+        # =================================================
+
+        if rating is not None:
+
+            query = query.filter(
+                Review.rating == rating
+            )
+
+        if sentiment:
+
+            query = query.filter(
+                func.lower(Review.sentiment)
+                == sentiment.lower()
+            )
+
+        total_reviews = query.count()
+
+        reviews = query.order_by(
+            desc(Review.created_at)
+        ).offset(skip).limit(limit).all()
+
+        response_data = []
+
+        for review in reviews:
+
+            response_data.append({
+
+                "id": review.id,
+
+                "company_id": review.company_id,
+
+                "author": review.author,
+
+                "rating": review.rating,
+
+                "review_text": review.review_text,
+
+                "sentiment": review.sentiment,
+
+                "source": review.source,
+
+                "review_date": review.review_date,
+
+                "created_at": review.created_at
+            })
 
         return {
 
             "success": True,
 
-            "total_reviews": len(reviews),
+            "company_id": company_id,
 
-            "reviews": [
+            "company_name": company.name,
 
-                {
-                    "id": r.id,
-                    "author": r.author,
-                    "rating": r.rating,
-                    "review_text": r.review_text,
-                    "sentiment": r.sentiment
-                }
+            "total_reviews": total_reviews,
 
-                for r in reviews
-            ]
+            "reviews": response_data
         }
+
+    except HTTPException:
+        raise
 
     except Exception as e:
 
         logger.error(
-            f"GET REVIEWS ERROR => {e}"
+            f"GET COMPANY REVIEWS ERROR => {e}"
+        )
+
+        logger.error(
+            traceback.format_exc()
         )
 
         raise HTTPException(
@@ -179,66 +244,8 @@ async def get_company_reviews(
         )
 
 # =========================================================
-# TEST ROUTE
+# SYNC REVIEWS
 # =========================================================
-
-@router.get("/test-sync")
-async def test_sync():
-
-    return {
-        "success": True,
-        "message": "SYNC ROUTE REGISTERED"
-    }
-):@router.get("/test-sync")
-async def test_sync():
-
-    return {
-        "success": True,
-        "message": "SYNC ROUTE REGISTERED"
-    }
-
-    try:
-
-        reviews = db.query(Review).filter(
-            Review.company_id == company_id
-        ).all()
-
-        return {
-
-            "success": True,
-
-            "total_reviews": len(reviews),
-
-            "reviews": [
-
-                {
-                    "id": r.id,
-                    "author": r.author,
-                    "rating": r.rating,
-                    "review_text": r.review_text,
-                    "sentiment": r.sentiment
-                }
-
-                for r in reviews
-            ]
-        }
-
-    except Exception as e:
-
-        logger.error(
-            f"GET REVIEWS ERROR => {e}"
-        )
-
-        raise HTTPException(
-            status_code=500,
-            detail=str(e)
-        )
-
-# =========================================================
-# SYNC ROUTE
-# =========================================================
-
-print("🔥 SYNC ROUTE REGISTERED 🔥")
 
 @router.post("/sync/{company_id}")
 async def sync_reviews(
@@ -249,12 +256,10 @@ async def sync_reviews(
     current_user=Depends(get_current_user)
 ):
 
-    print("🚀 SYNC ROUTE EXECUTED")
-
     try:
 
         logger.info(
-            f"SYNC STARTED => COMPANY {company_id}"
+            f"SYNC REQUEST RECEIVED => {company_id}"
         )
 
         # =================================================
@@ -273,7 +278,22 @@ async def sync_reviews(
             )
 
         # =================================================
-        # GOOGLE PLACE ID
+        # SCRAPER VALIDATION
+        # =================================================
+
+        if not SCRAPER_AVAILABLE:
+
+            return {
+
+                "success": False,
+
+                "message": "scraper.py import failed",
+
+                "company_id": company_id
+            }
+
+        # =================================================
+        # PLACE ID VALIDATION
         # =================================================
 
         google_place_id = getattr(
@@ -285,20 +305,12 @@ async def sync_reviews(
         if not google_place_id:
 
             return {
+
                 "success": False,
+
                 "message": "Google Place ID missing",
+
                 "company_id": company_id
-            }
-
-        # =================================================
-        # SCRAPER VALIDATION
-        # =================================================
-
-        if scrape_google_reviews is None:
-
-            return {
-                "success": False,
-                "message": "scraper.py import failed"
             }
 
         # =================================================
@@ -313,15 +325,14 @@ async def sync_reviews(
             google_place_id
         )
 
-        print(
-            f"SCRAPED REVIEWS COUNT => {len(scraped_reviews)}"
-        )
-
         if not scraped_reviews:
 
             return {
+
                 "success": False,
+
                 "message": "No reviews fetched",
+
                 "inserted_reviews": 0
             }
 
@@ -343,6 +354,7 @@ async def sync_reviews(
                 )
 
                 if not review_text:
+
                     continue
 
                 author = item.get(
@@ -361,6 +373,7 @@ async def sync_reviews(
                 if existing_review:
 
                     duplicate_reviews += 1
+
                     continue
 
                 review = Review(
@@ -407,22 +420,10 @@ async def sync_reviews(
                 )
 
         # =================================================
-        # COMMIT
+        # COMMIT DATABASE
         # =================================================
 
         db.commit()
-
-        logger.info(
-            f"""
-            REVIEW SYNC COMPLETE
-
-            COMPANY: {company_id}
-            INSERTED: {inserted_reviews}
-            DUPLICATES: {duplicate_reviews}
-            FAILED: {failed_reviews}
-            TOTAL SCRAPED: {len(scraped_reviews)}
-            """
-        )
 
         return {
 
@@ -451,64 +452,11 @@ async def sync_reviews(
         db.rollback()
 
         logger.error(
-            f"SYNC ERROR => {e}"
+            f"SYNC REVIEWS ERROR => {e}"
         )
-
-        logger.error(traceback.format_exc())
-
-        raise HTTPException(
-            status_code=500,
-            detail=f"Review sync failed: {str(e)}"
-        )
-
-# =========================================================
-# ANALYTICS
-# =========================================================
-
-@router.get("/analytics/{company_id}")
-async def review_analytics(
-    company_id: int,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user)
-):
-
-    try:
-
-        reviews = db.query(Review).filter(
-            Review.company_id == company_id
-        ).all()
-
-        total_reviews = len(reviews)
-
-        if total_reviews == 0:
-
-            return {
-                "success": True,
-                "total_reviews": 0,
-                "average_rating": 0
-            }
-
-        average_rating = round(
-            sum([r.rating for r in reviews])
-            / total_reviews,
-            2
-        )
-
-        return {
-
-            "success": True,
-
-            "company_id": company_id,
-
-            "total_reviews": total_reviews,
-
-            "average_rating": average_rating
-        }
-
-    except Exception as e:
 
         logger.error(
-            f"ANALYTICS ERROR => {e}"
+            traceback.format_exc()
         )
 
         raise HTTPException(
@@ -567,47 +515,56 @@ async def latest_reviews(
         )
 
 # =========================================================
-# DELETE REVIEW
+# ANALYTICS
 # =========================================================
 
-@router.delete("/delete/{review_id}")
-async def delete_review(
-    review_id: int,
+@router.get("/analytics/{company_id}")
+async def review_analytics(
+    company_id: int,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user)
 ):
 
     try:
 
-        review = db.query(Review).filter(
-            Review.id == review_id
-        ).first()
+        reviews = db.query(Review).filter(
+            Review.company_id == company_id
+        ).all()
 
-        if not review:
+        total_reviews = len(reviews)
 
-            raise HTTPException(
-                status_code=404,
-                detail="Review not found"
-            )
+        if total_reviews == 0:
 
-        db.delete(review)
+            return {
 
-        db.commit()
+                "success": True,
+
+                "total_reviews": 0,
+
+                "average_rating": 0
+            }
+
+        average_rating = round(
+            sum([r.rating for r in reviews])
+            / total_reviews,
+            2
+        )
 
         return {
-            "success": True,
-            "message": "Review deleted"
-        }
 
-    except HTTPException:
-        raise
+            "success": True,
+
+            "company_id": company_id,
+
+            "total_reviews": total_reviews,
+
+            "average_rating": average_rating
+        }
 
     except Exception as e:
 
-        db.rollback()
-
         logger.error(
-            f"DELETE REVIEW ERROR => {e}"
+            f"ANALYTICS ERROR => {e}"
         )
 
         raise HTTPException(
@@ -655,7 +612,58 @@ async def review_stats(
     except Exception as e:
 
         logger.error(
-            f"STATS ERROR => {e}"
+            f"REVIEW STATS ERROR => {e}"
+        )
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
+
+# =========================================================
+# DELETE REVIEW
+# =========================================================
+
+@router.delete("/delete/{review_id}")
+async def delete_review(
+    review_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user)
+):
+
+    try:
+
+        review = db.query(Review).filter(
+            Review.id == review_id
+        ).first()
+
+        if not review:
+
+            raise HTTPException(
+                status_code=404,
+                detail="Review not found"
+            )
+
+        db.delete(review)
+
+        db.commit()
+
+        return {
+
+            "success": True,
+
+            "message": "Review deleted"
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+
+        db.rollback()
+
+        logger.error(
+            f"DELETE REVIEW ERROR => {e}"
         )
 
         raise HTTPException(
