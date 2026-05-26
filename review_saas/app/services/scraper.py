@@ -1,6 +1,6 @@
 # =========================================================
 # FILE: app/scraper.py
-# TRUSTLYTICS AI - SAFE ASYNC GOOGLE REVIEWS SCRAPER
+# TRUSTLYTICS AI - POWERFUL ASYNC GOOGLE REVIEWS SCRAPER
 # =========================================================
 
 import os
@@ -13,7 +13,7 @@ import random
 import hashlib
 
 from datetime import datetime
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Callable
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -29,6 +29,10 @@ PROXY_PASSWORD = os.getenv("PROXY_PASSWORD", "").strip()
 PROXY_SERVER = os.getenv("PROXY_SERVER", "").strip()
 
 MAX_REVIEWS = int(os.getenv("SCRAPER_MAX_REVIEWS", "100"))
+SCRAPER_RETRIES = int(os.getenv("SCRAPER_RETRIES", "3"))
+SCRAPER_TIMEOUT = int(os.getenv("SCRAPER_TIMEOUT", "60"))
+
+ENABLE_SERPAPI = os.getenv("ENABLE_SERPAPI_SCRAPER", "true").lower() == "true"
 ENABLE_PLAYWRIGHT = os.getenv("ENABLE_PLAYWRIGHT_SCRAPER", "true").lower() == "true"
 ENABLE_CURL = os.getenv("ENABLE_CURL_SCRAPER", "true").lower() == "true"
 ENABLE_CRAWL4AI = os.getenv("ENABLE_CRAWL4AI_SCRAPER", "false").lower() == "true"
@@ -113,6 +117,10 @@ except Exception as e:
 # HELPERS
 # =========================================================
 
+def utc_now() -> datetime:
+    return datetime.utcnow()
+
+
 def get_user_agent() -> str:
     if FAKE_UA_AVAILABLE and fake_ua:
         try:
@@ -120,10 +128,13 @@ def get_user_agent() -> str:
         except Exception:
             pass
 
+    versions = ["120", "121", "122", "123", "124", "125"]
+    version = random.choice(versions)
+
     return (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0.0.0 Safari/537.36"
+        f"Chrome/{version}.0.0.0 Safari/537.36"
     )
 
 
@@ -132,6 +143,54 @@ async def human_delay(
     maximum: float = 2.0,
 ):
     await asyncio.sleep(random.uniform(minimum, maximum))
+
+
+async def retry_async(
+    name: str,
+    func: Callable,
+    *args,
+    retries: int = SCRAPER_RETRIES,
+    base_delay: float = 1.0,
+    **kwargs,
+):
+    last_error = None
+
+    for attempt in range(1, retries + 1):
+        try:
+            logger.info(f"{name} attempt {attempt}/{retries}")
+            return await func(*args, **kwargs)
+
+        except Exception as e:
+            last_error = e
+            logger.warning(f"{name} retry error => {e}")
+            await asyncio.sleep(base_delay * attempt + random.uniform(0.2, 1.0))
+
+    logger.error(f"{name} failed after retries => {last_error}")
+    return []
+
+
+async def retry_thread(
+    name: str,
+    func: Callable,
+    *args,
+    retries: int = SCRAPER_RETRIES,
+    base_delay: float = 1.0,
+    **kwargs,
+):
+    last_error = None
+
+    for attempt in range(1, retries + 1):
+        try:
+            logger.info(f"{name} attempt {attempt}/{retries}")
+            return await asyncio.to_thread(func, *args, **kwargs)
+
+        except Exception as e:
+            last_error = e
+            logger.warning(f"{name} retry error => {e}")
+            await asyncio.sleep(base_delay * attempt + random.uniform(0.2, 1.0))
+
+    logger.error(f"{name} failed after retries => {last_error}")
+    return []
 
 
 def safe_str(value: Any, default: str = "") -> str:
@@ -143,6 +202,10 @@ def safe_str(value: Any, default: str = "") -> str:
 
 def safe_rating(value: Any, default: int = 5) -> int:
     try:
+        if isinstance(value, str):
+            match = re.search(r"([1-5](?:\.\d+)?)", value)
+            value = match.group(1) if match else default
+
         rating = int(float(value))
     except Exception:
         rating = default
@@ -161,8 +224,11 @@ def stable_review_id(
     author: str,
     review_text: str,
 ) -> str:
-    raw = f"{place_id}:{author}:{review_text}"
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    raw = f"{place_id}:{author}:{review_text}".lower().strip()
+
+    return hashlib.sha256(
+        raw.encode("utf-8")
+    ).hexdigest()
 
 
 def parse_rating_from_text(text: str) -> int:
@@ -174,6 +240,18 @@ def parse_rating_from_text(text: str) -> int:
         return 5
 
     return safe_rating(match.group(1), 5)
+
+
+def parse_review_time(value: Any) -> Any:
+    if isinstance(value, datetime):
+        return value
+
+    value = safe_str(value)
+
+    if not value:
+        return utc_now()
+
+    return value
 
 
 def simple_sentiment(text: str) -> str:
@@ -194,6 +272,10 @@ def simple_sentiment(text: str) -> str:
         "clean",
         "helpful",
         "recommended",
+        "professional",
+        "quick",
+        "fast",
+        "happy",
     ]
 
     negative_words = [
@@ -210,6 +292,9 @@ def simple_sentiment(text: str) -> str:
         "expensive",
         "disappointed",
         "unprofessional",
+        "avoid",
+        "broken",
+        "angry",
     ]
 
     positive_score = sum(1 for word in positive_words if word in text)
@@ -224,6 +309,16 @@ def simple_sentiment(text: str) -> str:
     return "neutral"
 
 
+def sentiment_score_from_label(label: str) -> float:
+    if label == "positive":
+        return 0.85
+
+    if label == "negative":
+        return 0.15
+
+    return 0.5
+
+
 def normalize_review(
     review: Dict[str, Any],
     place_id: str = "",
@@ -233,6 +328,7 @@ def normalize_review(
         or review.get("text")
         or review.get("content")
         or review.get("snippet")
+        or review.get("description")
     )
 
     if not review_text:
@@ -269,7 +365,29 @@ def normalize_review(
             review_text=review_text,
         )
 
-    return {
+    sentiment = safe_str(
+        review.get("sentiment"),
+        simple_sentiment(review_text),
+    )
+
+    sentiment_score = review.get("sentiment_score")
+
+    if sentiment_score is None:
+        sentiment_score = sentiment_score_from_label(sentiment)
+
+    source = safe_str(
+        review.get("source"),
+        "Google",
+    )
+
+    google_review_time = parse_review_time(
+        review.get("google_review_time")
+        or review.get("review_date")
+        or review.get("date")
+        or review.get("time")
+    )
+
+    normalized = {
         "google_review_id": review_id,
         "author": author,
         "author_name": author,
@@ -277,12 +395,16 @@ def normalize_review(
         "review_text": review_text,
         "content": review_text,
         "text": review_text,
-        "sentiment": simple_sentiment(review_text),
-        "sentiment_score": 0.5,
-        "source": safe_str(review.get("source"), "Google"),
-        "google_review_time": review.get("google_review_time") or datetime.utcnow(),
-        "review_date": review.get("review_date") or datetime.utcnow(),
+        "sentiment": sentiment,
+        "sentiment_score": sentiment_score,
+        "source": source,
+        "google_review_time": google_review_time,
+        "review_date": google_review_time,
+        "scraped_at": utc_now(),
+        "place_id": place_id,
     }
+
+    return normalized
 
 
 def deduplicate_reviews(
@@ -294,11 +416,12 @@ def deduplicate_reviews(
     for review in reviews:
         review_text = safe_str(review.get("review_text"))
         author = safe_str(review.get("author"))
+        review_id = safe_str(review.get("google_review_id"))
 
         if not review_text:
             continue
 
-        key = f"{author.lower()}:{review_text.lower()}"
+        key = review_id or f"{author.lower()}:{review_text.lower()}"
 
         if key in seen:
             continue
@@ -312,6 +435,21 @@ def deduplicate_reviews(
 def google_maps_url(place_id: str) -> str:
     return f"https://www.google.com/maps/place/?q=place_id:{place_id}"
 
+
+def frontend_payload(
+    reviews: List[Dict[str, Any]],
+    place_id: str,
+    provider_status: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    return {
+        "success": True,
+        "place_id": place_id,
+        "total_reviews": len(reviews),
+        "reviews": reviews,
+        "provider_status": provider_status,
+        "scraped_at": utc_now().isoformat(),
+    }
+
 # =========================================================
 # SERPAPI SCRAPER
 # =========================================================
@@ -322,6 +460,10 @@ def serpapi_reviews(
     logger.info("SERPAPI STARTED")
 
     reviews = []
+
+    if not ENABLE_SERPAPI:
+        logger.info("SERPAPI disabled")
+        return reviews
 
     if not SERPAPI_KEY:
         logger.warning("SERPAPI_KEY missing")
@@ -339,39 +481,58 @@ def serpapi_reviews(
             "hl": "en",
         }
 
-        response = requests.get(
-            "https://serpapi.com/search.json",
-            params=params,
-            timeout=60,
-        )
-
-        response.raise_for_status()
-
-        data = response.json()
-
-        raw_reviews = data.get("reviews", [])
-
-        for item in raw_reviews:
-            review = normalize_review(
-                {
-                    "google_review_id": item.get("review_id") or item.get("id"),
-                    "author": item.get("user") or item.get("name"),
-                    "rating": item.get("rating"),
-                    "review_text": item.get("snippet") or item.get("text"),
-                    "google_review_time": item.get("date"),
-                    "source": "SERPAPI",
-                },
-                place_id=place_id,
+        while len(reviews) < MAX_REVIEWS:
+            response = requests.get(
+                "https://serpapi.com/search.json",
+                params=params,
+                timeout=SCRAPER_TIMEOUT,
             )
 
-            if review:
-                reviews.append(review)
+            response.raise_for_status()
+
+            data = response.json()
+
+            raw_reviews = data.get("reviews", []) or []
+
+            for item in raw_reviews:
+                review = normalize_review(
+                    {
+                        "google_review_id": item.get("review_id") or item.get("id"),
+                        "author": (
+                            item.get("user", {}).get("name")
+                            if isinstance(item.get("user"), dict)
+                            else item.get("user")
+                        ) or item.get("name"),
+                        "rating": item.get("rating"),
+                        "review_text": item.get("snippet") or item.get("text"),
+                        "google_review_time": item.get("date"),
+                        "source": "SERPAPI",
+                    },
+                    place_id=place_id,
+                )
+
+                if review:
+                    reviews.append(review)
+
+            next_page_token = (
+                data.get("serpapi_pagination", {}).get("next_page_token")
+                or data.get("search_metadata", {}).get("next_page_token")
+            )
+
+            if not next_page_token:
+                break
+
+            params["next_page_token"] = next_page_token
+
+            if len(reviews) >= MAX_REVIEWS:
+                break
 
         logger.info(f"SERPAPI REVIEWS => {len(reviews)}")
 
     except Exception as e:
         logger.error(f"SERPAPI ERROR => {e}")
         logger.error(traceback.format_exc())
+        raise
 
     return reviews
 
@@ -399,6 +560,7 @@ async def playwright_reviews(
         return reviews
 
     browser = None
+    context = None
 
     try:
         async with async_playwright() as p:
@@ -432,6 +594,7 @@ async def playwright_reviews(
                     "height": 1080,
                 },
                 locale="en-US",
+                timezone_id="UTC",
             )
 
             page = await context.new_page()
@@ -454,9 +617,27 @@ async def playwright_reviews(
 
             await human_delay(3, 5)
 
+            consent_buttons = [
+                'button:has-text("Accept all")',
+                'button:has-text("I agree")',
+                'button:has-text("Accept")',
+            ]
+
+            for selector in consent_buttons:
+                try:
+                    button = page.locator(selector).first()
+
+                    if await button.count() > 0:
+                        await button.click(timeout=3000)
+                        await human_delay(1, 2)
+                        break
+                except Exception:
+                    continue
+
             review_button_selectors = [
                 'button[jsaction*="pane.reviewChart.moreReviews"]',
                 'button[aria-label*="reviews"]',
+                'button[aria-label*="Reviews"]',
                 'button:has-text("reviews")',
                 'button:has-text("Reviews")',
             ]
@@ -466,23 +647,45 @@ async def playwright_reviews(
                     button = page.locator(selector).first()
 
                     if await button.count() > 0:
-                        await button.click(timeout=5000)
+                        await button.click(timeout=7000)
                         logger.info(f"review button clicked => {selector}")
                         await human_delay(2, 4)
                         break
-
                 except Exception:
                     continue
 
-            for _ in range(25):
-                await page.mouse.wheel(0, 8000)
-                await human_delay(0.5, 1.2)
+            scroll_targets = [
+                'div[role="main"]',
+                'div[aria-label*="Reviews"]',
+                'div.m6QErb',
+            ]
+
+            for _ in range(35):
+                scrolled = False
+
+                for selector in scroll_targets:
+                    try:
+                        target = page.locator(selector).last()
+
+                        if await target.count() > 0:
+                            await target.evaluate(
+                                "(el) => el.scrollTop = el.scrollHeight"
+                            )
+                            scrolled = True
+                            break
+                    except Exception:
+                        continue
+
+                if not scrolled:
+                    await page.mouse.wheel(0, 8000)
+
+                await human_delay(0.4, 1.0)
 
             html_content = await page.content()
 
             soup = BeautifulSoup(html_content, "html.parser")
 
-            review_blocks = soup.select("div.jftiEf")
+            review_blocks = soup.select("div.jftiEf, div[data-review-id]")
 
             logger.info(f"PLAYWRIGHT BLOCKS => {len(review_blocks)}")
 
@@ -500,7 +703,7 @@ async def playwright_reviews(
                     review_element = block.select_one(".wiI7pd")
 
                     if review_element:
-                        review_text = review_element.get_text(strip=True)
+                        review_text = review_element.get_text(" ", strip=True)
 
                     rating_element = block.select_one("span.kvMYJc")
 
@@ -509,8 +712,11 @@ async def playwright_reviews(
                             rating_element.get("aria-label", "")
                         )
 
+                    review_id = block.get("data-review-id") or ""
+
                     review = normalize_review(
                         {
+                            "google_review_id": review_id,
                             "author": author,
                             "rating": rating,
                             "review_text": review_text,
@@ -533,10 +739,18 @@ async def playwright_reviews(
         logger.error(traceback.format_exc())
 
         try:
+            if context:
+                await context.close()
+        except Exception:
+            pass
+
+        try:
             if browser:
                 await browser.close()
         except Exception:
             pass
+
+        raise
 
     logger.info(f"PLAYWRIGHT REVIEWS => {len(reviews)}")
 
@@ -583,8 +797,9 @@ def curl_reviews(
             headers={
                 "User-Agent": get_user_agent(),
                 "Accept-Language": "en-US,en;q=0.9",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             },
-            timeout=60,
+            timeout=SCRAPER_TIMEOUT,
         )
 
         parser = HTMLParser(response.text)
@@ -612,6 +827,7 @@ def curl_reviews(
     except Exception as e:
         logger.error(f"CURL ERROR => {e}")
         logger.error(traceback.format_exc())
+        raise
 
     logger.info(f"CURL REVIEWS => {len(reviews)}")
 
@@ -655,7 +871,7 @@ async def crawl4ai_reviews(
             logger.info(f"CRAWL4AI ELEMENTS => {len(elements)}")
 
             for element in elements:
-                review_text = safe_str(element.get_text(strip=True))
+                review_text = safe_str(element.get_text(" ", strip=True))
 
                 review = normalize_review(
                     {
@@ -673,6 +889,7 @@ async def crawl4ai_reviews(
     except Exception as e:
         logger.error(f"CRAWL4AI ERROR => {e}")
         logger.error(traceback.format_exc())
+        raise
 
     logger.info(f"CRAWL4AI REVIEWS => {len(reviews)}")
 
@@ -694,36 +911,95 @@ async def scrape_google_reviews(
         return []
 
     all_reviews = []
+    provider_status = []
+
+    async def run_provider(name: str, runner: Callable):
+        started_at = utc_now()
+
+        try:
+            reviews = await runner()
+
+            provider_status.append({
+                "provider": name,
+                "success": True,
+                "reviews": len(reviews),
+                "error": None,
+                "started_at": started_at.isoformat(),
+                "finished_at": utc_now().isoformat(),
+            })
+
+            return reviews
+
+        except Exception as e:
+            provider_status.append({
+                "provider": name,
+                "success": False,
+                "reviews": 0,
+                "error": str(e),
+                "started_at": started_at.isoformat(),
+                "finished_at": utc_now().isoformat(),
+            })
+
+            logger.error(f"{name} provider failed => {e}")
+            return []
 
     try:
-        serp_reviews = await asyncio.to_thread(
-            serpapi_reviews,
-            place_id,
+        serp_reviews = await run_provider(
+            "SERPAPI",
+            lambda: retry_thread(
+                "SERPAPI",
+                serpapi_reviews,
+                place_id,
+            ),
         )
 
         all_reviews.extend(serp_reviews)
+        all_reviews = deduplicate_reviews(all_reviews)
 
         logger.info(f"AFTER SERPAPI => {len(all_reviews)}")
 
         if len(all_reviews) < MAX_REVIEWS:
-            playwright_result = await playwright_reviews(place_id)
+            playwright_result = await run_provider(
+                "PLAYWRIGHT",
+                lambda: retry_async(
+                    "PLAYWRIGHT",
+                    playwright_reviews,
+                    place_id,
+                ),
+            )
+
             all_reviews.extend(playwright_result)
+            all_reviews = deduplicate_reviews(all_reviews)
 
             logger.info(f"AFTER PLAYWRIGHT => {len(all_reviews)}")
 
         if len(all_reviews) < MAX_REVIEWS:
-            curl_result = await asyncio.to_thread(
-                curl_reviews,
-                place_id,
+            curl_result = await run_provider(
+                "CURL_CFFI",
+                lambda: retry_thread(
+                    "CURL_CFFI",
+                    curl_reviews,
+                    place_id,
+                ),
             )
 
             all_reviews.extend(curl_result)
+            all_reviews = deduplicate_reviews(all_reviews)
 
             logger.info(f"AFTER CURL => {len(all_reviews)}")
 
         if len(all_reviews) < MAX_REVIEWS:
-            crawl_result = await crawl4ai_reviews(place_id)
+            crawl_result = await run_provider(
+                "CRAWL4AI",
+                lambda: retry_async(
+                    "CRAWL4AI",
+                    crawl4ai_reviews,
+                    place_id,
+                ),
+            )
+
             all_reviews.extend(crawl_result)
+            all_reviews = deduplicate_reviews(all_reviews)
 
             logger.info(f"AFTER CRAWL4AI => {len(all_reviews)}")
 
@@ -731,6 +1007,9 @@ async def scrape_google_reviews(
 
         if MAX_REVIEWS > 0:
             all_reviews = all_reviews[:MAX_REVIEWS]
+
+        for review in all_reviews:
+            review["scraper_status"] = provider_status
 
         logger.info(f"FINAL UNIQUE REVIEWS => {len(all_reviews)}")
 
@@ -741,6 +1020,23 @@ async def scrape_google_reviews(
         logger.error(traceback.format_exc())
 
         return []
+
+
+async def scrape_google_reviews_with_meta(
+    place_id: str,
+) -> Dict[str, Any]:
+    reviews = await scrape_google_reviews(place_id)
+
+    provider_status = []
+
+    if reviews:
+        provider_status = reviews[0].get("scraper_status", [])
+
+    return frontend_payload(
+        reviews=reviews,
+        place_id=place_id,
+        provider_status=provider_status,
+    )
 
 # =========================================================
 # TEST
@@ -754,11 +1050,11 @@ if __name__ == "__main__":
             "ChIJN1t_tDeuEmsRUsoyG83frY4",
         )
 
-        reviews = await scrape_google_reviews(place_id)
+        payload = await scrape_google_reviews_with_meta(place_id)
 
         print(
             json.dumps(
-                reviews[:5],
+                payload,
                 indent=4,
                 default=str,
             )
