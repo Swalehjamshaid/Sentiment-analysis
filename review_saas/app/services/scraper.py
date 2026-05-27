@@ -1,6 +1,6 @@
 # =========================================================
-# QUANTUM-INSPIRED ENTERPRISE SCRAPER ENGINE
 # FILE: app/services/scraper.py
+# QUANTUM ENTERPRISE SCRAPER ENGINE
 # FULLY ALIGNED WITH review.py
 # =========================================================
 
@@ -13,8 +13,8 @@ from __future__ import annotations
 import os
 import re
 import time
-import json
 import math
+import json
 import random
 import asyncio
 import hashlib
@@ -47,6 +47,28 @@ print("🚀 QUANTUM SCRAPER ENGINE INITIALIZING")
 # =========================================================
 
 import requests
+
+# =========================================================
+# CURL_CFFI
+# =========================================================
+
+CURL_CFFI_AVAILABLE = False
+
+try:
+
+    from curl_cffi import requests as curl_requests
+
+    CURL_CFFI_AVAILABLE = True
+
+    logger.info(
+        "✅ CURL_CFFI READY"
+    )
+
+except Exception as e:
+
+    logger.error(
+        f"❌ CURL_CFFI ERROR => {e}"
+    )
 
 # =========================================================
 # CACHE
@@ -167,6 +189,28 @@ except Exception as e:
     )
 
 # =========================================================
+# CRAWL4AI
+# =========================================================
+
+CRAWL4AI_AVAILABLE = False
+
+try:
+
+    from crawl4ai import AsyncWebCrawler
+
+    CRAWL4AI_AVAILABLE = True
+
+    logger.info(
+        "✅ CRAWL4AI READY"
+    )
+
+except Exception as e:
+
+    logger.error(
+        f"❌ CRAWL4AI ERROR => {e}"
+    )
+
+# =========================================================
 # FAKE USER AGENT
 # =========================================================
 
@@ -185,13 +229,8 @@ except Exception:
     fake_ua = None
 
 # =========================================================
-# ENVIRONMENT VARIABLES
+# ENVIRONMENT
 # =========================================================
-
-SCRAPINGDOG_API_KEY = os.getenv(
-    "SCRAPINGDOG_API_KEY",
-    ""
-).strip()
 
 SCRAPER_TIMEOUT = int(
     os.getenv(
@@ -250,6 +289,10 @@ if PROXY_SERVER:
         "password":
             PROXY_PASSWORD
     })
+
+logger.info(
+    f"✅ PROXY COUNT => {len(PROXY_POOL)}"
+)
 
 # =========================================================
 # CONCURRENCY
@@ -411,7 +454,7 @@ def get_best_proxy():
         return None
 
 # =========================================================
-# HUMAN ENTROPY
+# QUANTUM DELAY
 # =========================================================
 
 async def quantum_delay():
@@ -604,214 +647,211 @@ def deduplicate_reviews(
     return unique
 
 # =========================================================
-# SCRAPINGDOG PROVIDER
+# CURL_CFFI PROVIDER
 # =========================================================
 
-@retry(
-    stop=stop_after_attempt(5),
-    wait=wait_random_exponential(
-        min=2,
-        max=20
-    ),
-    reraise=True
-)
-def scrapingdog_reviews(
+def curl_cffi_reviews(
     place_id: str
 ):
 
     reviews = []
 
-    if not SCRAPINGDOG_API_KEY:
+    if not CURL_CFFI_AVAILABLE:
 
         return reviews
 
-    for attempt in range(5):
+    try:
 
-        try:
+        proxy = get_best_proxy()
 
-            logger.info(
-                f"🔥 SCRAPINGDOG ATTEMPT => {attempt+1}"
+        proxies = None
+
+        if proxy:
+
+            proxy_url = (
+                f"http://"
+                f"{proxy['username']}:"
+                f"{proxy['password']}@"
+                f"{proxy['server'].replace('http://','')}"
             )
 
-            response = requests.get(
+            proxies = {
 
-                "https://api.scrapingdog.com/scrape",
+                "http": proxy_url,
+                "https": proxy_url
+            }
 
-                params={
+        response = curl_requests.get(
 
-                    "api_key":
-                        SCRAPINGDOG_API_KEY,
+            maps_url(place_id),
 
-                    "url":
-                        maps_url(place_id),
+            impersonate="chrome124",
 
-                    "dynamic":
-                        "true",
+            proxies=proxies,
 
-                    "country":
-                        "us"
-                },
+            headers={
 
-                timeout=SCRAPER_TIMEOUT
+                "User-Agent":
+                    get_user_agent()
+            },
+
+            timeout=SCRAPER_TIMEOUT
+        )
+
+        html = response.text
+
+        if detect_captcha(html):
+
+            return reviews
+
+        if SELECTOLAX_AVAILABLE:
+
+            tree = HTMLParser(html)
+
+            cards = tree.css(
+                "div.jftiEf"
             )
 
-            if response.status_code != 200:
+            for card in cards:
 
-                continue
+                try:
 
-            html = response.text
+                    author = ""
+                    text = ""
+
+                    author_node = card.css_first(
+                        ".d4r55"
+                    )
+
+                    if author_node:
+
+                        author = author_node.text()
+
+                    text_node = card.css_first(
+                        ".wiI7pd"
+                    )
+
+                    if text_node:
+
+                        text = text_node.text()
+
+                    normalized = normalize_review({
+
+                        "author":
+                            author,
+
+                        "rating":
+                            5,
+
+                        "review_text":
+                            text
+
+                    }, place_id)
+
+                    if normalized:
+
+                        reviews.append(
+                            normalized
+                        )
+
+                except Exception:
+                    continue
+
+    except Exception as e:
+
+        logger.error(
+            f"❌ CURL_CFFI ERROR => {e}"
+        )
+
+    return reviews
+
+# =========================================================
+# CRAWL4AI PROVIDER
+# =========================================================
+
+async def crawl4ai_reviews(
+    place_id: str
+):
+
+    reviews = []
+
+    if not CRAWL4AI_AVAILABLE:
+
+        return reviews
+
+    try:
+
+        async with AsyncWebCrawler() as crawler:
+
+            result = await crawler.arun(
+
+                url=maps_url(place_id)
+            )
+
+            html = result.html
 
             if detect_captcha(html):
 
-                continue
-
-            parser_results = []
-
-            # =====================================================
-            # QUANTUM PARALLEL PARSERS
-            # =====================================================
+                return reviews
 
             if SELECTOLAX_AVAILABLE:
 
-                try:
+                tree = HTMLParser(html)
 
-                    tree = HTMLParser(html)
+                cards = tree.css(
+                    "div.jftiEf"
+                )
 
-                    cards = tree.css(
-                        "div.jftiEf"
-                    )
+                for card in cards:
 
-                    for card in cards:
+                    try:
 
-                        try:
+                        author = ""
+                        text = ""
 
-                            author = ""
-                            text = ""
-                            rating = 5
+                        author_node = card.css_first(
+                            ".d4r55"
+                        )
 
-                            author_node = card.css_first(
-                                ".d4r55"
+                        if author_node:
+
+                            author = author_node.text()
+
+                        text_node = card.css_first(
+                            ".wiI7pd"
+                        )
+
+                        if text_node:
+
+                            text = text_node.text()
+
+                        normalized = normalize_review({
+
+                            "author":
+                                author,
+
+                            "rating":
+                                5,
+
+                            "review_text":
+                                text
+
+                        }, place_id)
+
+                        if normalized:
+
+                            reviews.append(
+                                normalized
                             )
 
-                            if author_node:
+                    except Exception:
+                        continue
 
-                                author = author_node.text()
+    except Exception as e:
 
-                            text_node = card.css_first(
-                                ".wiI7pd"
-                            )
-
-                            if text_node:
-
-                                text = text_node.text()
-
-                            normalized = normalize_review({
-
-                                "author":
-                                    author,
-
-                                "rating":
-                                    rating,
-
-                                "review_text":
-                                    text
-
-                            }, place_id)
-
-                            if normalized:
-
-                                parser_results.append(
-                                    normalized
-                                )
-
-                        except Exception:
-                            continue
-
-                except Exception:
-                    pass
-
-            if not parser_results and BS4_AVAILABLE:
-
-                try:
-
-                    soup = BeautifulSoup(
-                        html,
-                        "html.parser"
-                    )
-
-                    cards = soup.select(
-                        "div.jftiEf"
-                    )
-
-                    for card in cards:
-
-                        try:
-
-                            author = ""
-                            text = ""
-
-                            author_node = card.select_one(
-                                ".d4r55"
-                            )
-
-                            if author_node:
-
-                                author = author_node.get_text(
-                                    strip=True
-                                )
-
-                            text_node = card.select_one(
-                                ".wiI7pd"
-                            )
-
-                            if text_node:
-
-                                text = text_node.get_text(
-                                    strip=True
-                                )
-
-                            normalized = normalize_review({
-
-                                "author":
-                                    author,
-
-                                "rating":
-                                    5,
-
-                                "review_text":
-                                    text
-
-                            }, place_id)
-
-                            if normalized:
-
-                                parser_results.append(
-                                    normalized
-                                )
-
-                        except Exception:
-                            continue
-
-                except Exception:
-                    pass
-
-            reviews.extend(
-                parser_results
-            )
-
-            if reviews:
-
-                break
-
-        except Exception as e:
-
-            logger.error(
-                f"❌ SCRAPINGDOG ERROR => {e}"
-            )
-
-            time.sleep(
-                random.uniform(2, 8)
-            )
+        logger.error(
+            f"❌ CRAWL4AI ERROR => {e}"
+        )
 
     return reviews
 
@@ -843,14 +883,6 @@ async def playwright_reviews(
             proxy = get_best_proxy()
 
             try:
-
-                logger.info(
-                    f"🔥 PLAYWRIGHT ATTEMPT => {attempt+1}"
-                )
-
-                logger.info(
-                    f"🔥 USING PROXY => {proxy}"
-                )
 
                 async with async_playwright() as p:
 
@@ -1000,14 +1032,6 @@ async def playwright_reviews(
                         except Exception:
                             break
 
-                    html = await page.content()
-
-                    if detect_captcha(html):
-
-                        raise Exception(
-                            "CAPTCHA DETECTED"
-                        )
-
                     cards = page.locator(
                         "div.jftiEf"
                     )
@@ -1027,7 +1051,6 @@ async def playwright_reviews(
 
                             author = "Anonymous"
                             text = ""
-                            rating = 5
 
                             try:
 
@@ -1067,7 +1090,7 @@ async def playwright_reviews(
                                     author,
 
                                 "rating":
-                                    rating,
+                                    5,
 
                                 "review_text":
                                     text
@@ -1125,7 +1148,7 @@ async def playwright_reviews(
     return reviews
 
 # =========================================================
-# QUANTUM PROVIDER ORCHESTRATOR
+# QUANTUM ORCHESTRATOR
 # =========================================================
 
 async def scrape_google_reviews(
@@ -1150,23 +1173,19 @@ async def scrape_google_reviews(
 
         if cached:
 
-            logger.info(
-                "⚡ CACHE HIT"
-            )
-
             return cached
 
     except Exception:
         pass
 
-    # =====================================================
-    # QUANTUM PARALLEL EXECUTION
-    # =====================================================
-
     tasks = [
 
         asyncio.to_thread(
-            scrapingdog_reviews,
+            curl_cffi_reviews,
+            place_id
+        ),
+
+        crawl4ai_reviews(
             place_id
         ),
 
