@@ -1,7 +1,6 @@
 # =========================================================
 # FILE: app/services/scraper.py
-# TRUSTLYTICS AI - NEXT GEN ENTERPRISE SCRAPER
-# MODERN • RESILIENT • MULTI-LAYER • PROXY SAFE
+# TRUSTLYTICS AI - WORLD CLASS ENTERPRISE SCRAPER
 # FULLY ALIGNED WITH review.py
 # =========================================================
 
@@ -13,8 +12,8 @@ from __future__ import annotations
 
 import os
 import re
-import json
 import time
+import json
 import random
 import asyncio
 import hashlib
@@ -22,11 +21,11 @@ import logging
 import traceback
 
 from datetime import datetime
+
 from typing import (
     Dict,
     List,
-    Any,
-    Optional
+    Any
 )
 
 # =========================================================
@@ -37,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 logger.setLevel(logging.INFO)
 
-print("🔥 NEXT GEN SCRAPER BOOTING")
+print("🔥 WORLD CLASS SCRAPER INITIALIZING")
 
 # =========================================================
 # REQUESTS
@@ -46,7 +45,7 @@ print("🔥 NEXT GEN SCRAPER BOOTING")
 import requests
 
 # =========================================================
-# CURL CFFI
+# CURL_CFFI
 # =========================================================
 
 CURL_CFFI_AVAILABLE = False
@@ -57,11 +56,15 @@ try:
 
     CURL_CFFI_AVAILABLE = True
 
-    logger.info("✅ CURL_CFFI READY")
+    logger.info(
+        "✅ CURL_CFFI READY"
+    )
 
 except Exception as e:
 
-    logger.error(f"❌ CURL_CFFI ERROR => {e}")
+    logger.error(
+        f"❌ CURL_CFFI ERROR => {e}"
+    )
 
 # =========================================================
 # TENACITY
@@ -80,6 +83,17 @@ from tenacity import (
 import backoff
 
 # =========================================================
+# CACHE
+# =========================================================
+
+from cachetools import TTLCache
+
+review_cache = TTLCache(
+    maxsize=1000,
+    ttl=3600
+)
+
+# =========================================================
 # SELECTOLAX
 # =========================================================
 
@@ -91,14 +105,18 @@ try:
 
     SELECTOLAX_AVAILABLE = True
 
-    logger.info("✅ SELECTOLAX READY")
+    logger.info(
+        "✅ SELECTOLAX READY"
+    )
 
 except Exception as e:
 
-    logger.error(f"❌ SELECTOLAX ERROR => {e}")
+    logger.error(
+        f"❌ SELECTOLAX ERROR => {e}"
+    )
 
 # =========================================================
-# BS4 FALLBACK
+# BEAUTIFULSOUP
 # =========================================================
 
 BS4_AVAILABLE = False
@@ -109,11 +127,15 @@ try:
 
     BS4_AVAILABLE = True
 
-    logger.info("✅ BS4 READY")
+    logger.info(
+        "✅ BS4 READY"
+    )
 
 except Exception as e:
 
-    logger.error(f"❌ BS4 ERROR => {e}")
+    logger.error(
+        f"❌ BS4 ERROR => {e}"
+    )
 
 # =========================================================
 # PLAYWRIGHT
@@ -130,11 +152,15 @@ try:
 
     PLAYWRIGHT_AVAILABLE = True
 
-    logger.info("✅ PLAYWRIGHT READY")
+    logger.info(
+        "✅ PLAYWRIGHT READY"
+    )
 
 except Exception as e:
 
-    logger.error(f"❌ PLAYWRIGHT ERROR => {e}")
+    logger.error(
+        f"❌ PLAYWRIGHT ERROR => {e}"
+    )
 
 # =========================================================
 # PLAYWRIGHT STEALTH
@@ -148,11 +174,15 @@ try:
 
     STEALTH_AVAILABLE = True
 
-    logger.info("✅ STEALTH READY")
+    logger.info(
+        "✅ STEALTH READY"
+    )
 
 except Exception as e:
 
-    logger.error(f"❌ STEALTH ERROR => {e}")
+    logger.error(
+        f"❌ STEALTH ERROR => {e}"
+    )
 
 # =========================================================
 # FAKE USER AGENT
@@ -168,31 +198,24 @@ try:
 
     FAKE_UA_AVAILABLE = True
 
-    logger.info("✅ FAKE UA READY")
+    logger.info(
+        "✅ FAKE USERAGENT READY"
+    )
 
 except Exception as e:
 
-    logger.error(f"❌ FAKE UA ERROR => {e}")
+    logger.error(
+        f"❌ FAKE USERAGENT ERROR => {e}"
+    )
 
     fake_ua = None
 
 # =========================================================
-# CACHE
+# ENVIRONMENT VARIABLES
 # =========================================================
 
-from cachetools import TTLCache
-
-review_cache = TTLCache(
-    maxsize=1000,
-    ttl=3600
-)
-
-# =========================================================
-# ENVIRONMENT
-# =========================================================
-
-SERPAPI_KEY = os.getenv(
-    "SERPAPI_KEY",
+SCRAPINGDOG_API_KEY = os.getenv(
+    "SCRAPINGDOG_API_KEY",
     ""
 ).strip()
 
@@ -216,7 +239,7 @@ HEADLESS_MODE = os.getenv(
 ).lower() == "true"
 
 # =========================================================
-# PROXIES
+# PROXY CONFIGURATION
 # =========================================================
 
 PROXY_SERVER = os.getenv(
@@ -257,7 +280,7 @@ logger.info(
 )
 
 # =========================================================
-# CONCURRENCY CONTROL
+# CONCURRENCY PROTECTION
 # =========================================================
 
 SCRAPER_SEMAPHORE = asyncio.Semaphore(2)
@@ -279,6 +302,29 @@ def maps_url(
         "https://www.google.com/maps/place/"
         f"?q=place_id:{place_id}"
     )
+
+
+def get_proxy():
+
+    try:
+
+        available = [
+
+            p for p in PROXY_POOL
+            if p["server"] not in FAILED_PROXIES
+        ]
+
+        if not available:
+
+            return None
+
+        return random.choice(
+            available
+        )
+
+    except Exception:
+
+        return None
 
 
 def get_user_agent():
@@ -324,29 +370,6 @@ def get_user_agent():
     )
 
 
-def get_proxy():
-
-    try:
-
-        available = [
-
-            p for p in PROXY_POOL
-            if p["server"] not in FAILED_PROXIES
-        ]
-
-        if not available:
-
-            return None
-
-        return random.choice(
-            available
-        )
-
-    except Exception:
-
-        return None
-
-
 async def human_delay(
     minimum=1,
     maximum=4
@@ -360,7 +383,30 @@ async def human_delay(
     )
 
 # =========================================================
-# REVIEW ID
+# CAPTCHA DETECTION
+# =========================================================
+
+def detect_captcha(
+    html: str
+):
+
+    html_lower = html.lower()
+
+    patterns = [
+
+        "captcha",
+        "unusual traffic",
+        "sorry",
+        "not a robot"
+    ]
+
+    return any(
+        p in html_lower
+        for p in patterns
+    )
+
+# =========================================================
+# REVIEW NORMALIZATION
 # =========================================================
 
 def generate_review_id(
@@ -375,9 +421,6 @@ def generate_review_id(
         raw.encode("utf-8")
     ).hexdigest()
 
-# =========================================================
-# NORMALIZATION
-# =========================================================
 
 def normalize_review(
     review: Dict[str, Any],
@@ -495,9 +538,9 @@ def deduplicate_reviews(
     reviews: List[Dict]
 ):
 
-    seen = set()
-
     unique_reviews = []
+
+    seen = set()
 
     for review in reviews:
 
@@ -507,9 +550,11 @@ def deduplicate_reviews(
         )
 
         if not review_id:
+
             continue
 
         if review_id in seen:
+
             continue
 
         seen.add(review_id)
@@ -521,30 +566,7 @@ def deduplicate_reviews(
     return unique_reviews
 
 # =========================================================
-# CAPTCHA DETECTION
-# =========================================================
-
-def detect_captcha(
-    html: str
-):
-
-    lower = html.lower()
-
-    patterns = [
-
-        "captcha",
-        "unusual traffic",
-        "sorry",
-        "not a robot"
-    ]
-
-    return any(
-        p in lower
-        for p in patterns
-    )
-
-# =========================================================
-# SERPAPI PROVIDER
+# SCRAPINGDOG PROVIDER
 # =========================================================
 
 @retry(
@@ -555,118 +577,239 @@ def detect_captcha(
     ),
     reraise=True
 )
-def serpapi_reviews(
+def scrapingdog_reviews(
     place_id: str
 ):
 
     reviews = []
 
-    if not SERPAPI_KEY:
+    if not SCRAPINGDOG_API_KEY:
 
         logger.warning(
-            "⚠️ SERPAPI KEY MISSING"
+            "⚠️ SCRAPINGDOG API KEY MISSING"
         )
 
         return reviews
 
-    for attempt in range(3):
+    for attempt in range(5):
 
         try:
 
             logger.info(
-                f"🔥 SERPAPI ATTEMPT => {attempt+1}"
+                f"🔥 SCRAPINGDOG ATTEMPT => {attempt+1}"
             )
 
-            proxies = None
-
-            proxy = get_proxy()
-
-            if proxy:
-
-                proxy_url = (
-                    f"http://"
-                    f"{proxy['username']}:"
-                    f"{proxy['password']}@"
-                    f"{proxy['server'].replace('http://','')}"
-                )
-
-                proxies = {
-
-                    "http": proxy_url,
-                    "https": proxy_url
-                }
+            target_url = maps_url(
+                place_id
+            )
 
             response = requests.get(
 
-                "https://serpapi.com/search.json",
+                "https://api.scrapingdog.com/scrape",
 
                 params={
 
-                    "engine":
-                        "google_maps_reviews",
-
-                    "place_id":
-                        place_id,
-
                     "api_key":
-                        SERPAPI_KEY,
+                        SCRAPINGDOG_API_KEY,
 
-                    "hl":
-                        "en"
+                    "url":
+                        target_url,
+
+                    "dynamic":
+                        "true",
+
+                    "country":
+                        "us"
                 },
-
-                proxies=proxies,
 
                 timeout=SCRAPER_TIMEOUT
             )
 
             if response.status_code != 200:
 
+                logger.error(
+                    f"❌ SCRAPINGDOG STATUS => {response.status_code}"
+                )
+
+                time.sleep(
+                    random.uniform(2, 6)
+                )
+
                 continue
 
-            data = response.json()
+            html = response.text
 
-            raw_reviews = data.get(
-                "reviews",
-                []
-            )
+            if detect_captcha(html):
 
-            if not isinstance(
-                raw_reviews,
-                list
-            ):
+                logger.warning(
+                    "⚠️ SCRAPINGDOG CAPTCHA DETECTED"
+                )
 
-                raw_reviews = []
+                continue
 
-            for item in raw_reviews:
+            # =====================================================
+            # SELECTOLAX PRIMARY PARSER
+            # =====================================================
 
-                normalized = normalize_review({
+            if SELECTOLAX_AVAILABLE:
 
-                    "author":
-                        item.get(
-                            "user",
-                            "Google User"
-                        ),
+                try:
 
-                    "rating":
-                        item.get(
-                            "rating",
-                            5
-                        ),
+                    tree = HTMLParser(html)
 
-                    "review_text":
-                        item.get(
-                            "snippet",
-                            ""
-                        )
-
-                }, place_id)
-
-                if normalized:
-
-                    reviews.append(
-                        normalized
+                    cards = tree.css(
+                        "div.jftiEf"
                     )
+
+                    for card in cards:
+
+                        try:
+
+                            author = ""
+                            text = ""
+                            rating = 5
+
+                            author_node = card.css_first(
+                                ".d4r55"
+                            )
+
+                            if author_node:
+
+                                author = author_node.text()
+
+                            text_node = card.css_first(
+                                ".wiI7pd"
+                            )
+
+                            if text_node:
+
+                                text = text_node.text()
+
+                            rating_node = card.css_first(
+                                "span.kvMYJc"
+                            )
+
+                            if rating_node:
+
+                                aria = rating_node.attributes.get(
+                                    "aria-label",
+                                    ""
+                                )
+
+                                match = re.search(
+                                    r"(\d)",
+                                    aria
+                                )
+
+                                if match:
+
+                                    rating = int(
+                                        match.group(1)
+                                    )
+
+                            normalized = normalize_review({
+
+                                "author":
+                                    author,
+
+                                "rating":
+                                    rating,
+
+                                "review_text":
+                                    text
+
+                            }, place_id)
+
+                            if normalized:
+
+                                reviews.append(
+                                    normalized
+                                )
+
+                        except Exception:
+                            continue
+
+                except Exception as parser_error:
+
+                    logger.error(
+                        f"❌ SELECTOLAX ERROR => {parser_error}"
+                    )
+
+            # =====================================================
+            # BS4 FALLBACK
+            # =====================================================
+
+            if not reviews and BS4_AVAILABLE:
+
+                try:
+
+                    soup = BeautifulSoup(
+                        html,
+                        "html.parser"
+                    )
+
+                    cards = soup.select(
+                        "div.jftiEf"
+                    )
+
+                    for card in cards:
+
+                        try:
+
+                            author = ""
+                            text = ""
+
+                            author_node = card.select_one(
+                                ".d4r55"
+                            )
+
+                            if author_node:
+
+                                author = author_node.get_text(
+                                    strip=True
+                                )
+
+                            text_node = card.select_one(
+                                ".wiI7pd"
+                            )
+
+                            if text_node:
+
+                                text = text_node.get_text(
+                                    strip=True
+                                )
+
+                            normalized = normalize_review({
+
+                                "author":
+                                    author,
+
+                                "rating":
+                                    5,
+
+                                "review_text":
+                                    text
+
+                            }, place_id)
+
+                            if normalized:
+
+                                reviews.append(
+                                    normalized
+                                )
+
+                        except Exception:
+                            continue
+
+                except Exception as bs4_error:
+
+                    logger.error(
+                        f"❌ BS4 ERROR => {bs4_error}"
+                    )
+
+            logger.info(
+                f"✅ SCRAPINGDOG REVIEWS => {len(reviews)}"
+            )
 
             if reviews:
 
@@ -675,12 +818,12 @@ def serpapi_reviews(
         except Exception as e:
 
             logger.error(
-                f"❌ SERPAPI ERROR => {e}"
+                f"❌ SCRAPINGDOG ERROR => {e}"
             )
 
-            await_sleep = random.uniform(2, 8)
-
-            time.sleep(await_sleep)
+            time.sleep(
+                random.uniform(2, 8)
+            )
 
     return reviews
 
@@ -711,7 +854,15 @@ async def playwright_reviews(
 
             try:
 
+                logger.info(
+                    f"🔥 PLAYWRIGHT ATTEMPT => {browser_attempt+1}"
+                )
+
                 proxy = get_proxy()
+
+                logger.info(
+                    f"🔥 PLAYWRIGHT PROXY => {proxy}"
+                )
 
                 async with async_playwright() as p:
 
@@ -725,13 +876,13 @@ async def playwright_reviews(
 
                             "--disable-blink-features=AutomationControlled",
 
-                            "--no-sandbox",
-
                             "--disable-dev-shm-usage",
 
                             "--disable-gpu",
 
-                            "--window-size=1920,1080"
+                            "--window-size=1920,1080",
+
+                            "--no-sandbox"
                         ]
                     )
 
@@ -782,7 +933,7 @@ async def playwright_reviews(
                         5
                     )
 
-                    review_selectors = [
+                    selectors = [
 
                         'button[jsaction*="pane.reviewChart.moreReviews"]',
 
@@ -791,7 +942,7 @@ async def playwright_reviews(
                         'button[aria-label*="Reviews"]'
                     ]
 
-                    for selector in review_selectors:
+                    for selector in selectors:
 
                         try:
 
@@ -866,19 +1017,15 @@ async def playwright_reviews(
 
                     if detect_captcha(html):
 
-                        logger.warning(
-                            "⚠️ CAPTCHA DETECTED"
-                        )
-
                         raise Exception(
-                            "Captcha detected"
+                            "CAPTCHA DETECTED"
                         )
 
-                    review_cards = page.locator(
+                    cards = page.locator(
                         "div.jftiEf"
                     )
 
-                    total_cards = await review_cards.count()
+                    total_cards = await cards.count()
 
                     total_cards = min(
                         total_cards,
@@ -889,7 +1036,7 @@ async def playwright_reviews(
 
                         try:
 
-                            card = review_cards.nth(index)
+                            card = cards.nth(index)
 
                             author = "Anonymous"
                             text = ""
@@ -984,7 +1131,11 @@ async def playwright_reviews(
             except Exception as e:
 
                 logger.error(
-                    f"❌ PLAYWRIGHT ATTEMPT FAILED => {e}"
+                    f"❌ PLAYWRIGHT FAILED => {e}"
+                )
+
+                logger.error(
+                    traceback.format_exc()
                 )
 
                 await asyncio.sleep(
@@ -1044,9 +1195,9 @@ async def scrape_google_reviews(
     providers = [
 
         (
-            "serpapi",
+            "scrapingdog",
             lambda: asyncio.to_thread(
-                serpapi_reviews,
+                scrapingdog_reviews,
                 place_id
             )
         ),
@@ -1143,5 +1294,5 @@ async def run_scraper(
 # =========================================================
 
 logger.info(
-    "✅ NEXT GEN ENTERPRISE SCRAPER READY"
+    "✅ WORLD CLASS ENTERPRISE SCRAPER READY"
 )
