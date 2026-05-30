@@ -738,6 +738,36 @@ async def patchright_reviews(
 
                     context = await browser.new_context(
 
+    user_agent=get_user_agent(),
+
+    locale="en-US",
+
+    timezone_id="America/New_York",
+
+    java_script_enabled=True,
+
+    ignore_https_errors=True,
+
+    permissions=[],
+
+    color_scheme="dark",
+
+    viewport={
+
+        "width":
+            random.randint(
+                1366,
+                1920
+            ),
+
+        "height":
+            random.randint(
+                768,
+                1080
+            )
+    }
+)
+
                         user_agent=get_user_agent(),
 
                         locale="en-US",
@@ -815,6 +845,21 @@ async def patchright_reviews(
                     )
 
                    review_button_selectors = [
+
+    'button[jsaction*="pane.reviewChart.moreReviews"]',
+
+    'button[aria-label*="reviews"]',
+
+    'button[aria-label*="Reviews"]',
+
+    'button[aria-label*="Review"]',
+
+    'button[jsaction*="reviews"]',
+
+    'button[data-tab-index="1"]',
+
+    '[role="tab"][aria-label*="Reviews"]'
+]
 
     'button[jsaction*="pane.reviewChart.moreReviews"]',
 
@@ -940,7 +985,7 @@ async def patchright_reviews(
 
                     no_growth = 0
 
-                    while no_growth < 5:
+                    while no_growth < 8:
 
                         try:
 
@@ -1092,8 +1137,7 @@ async def patchright_reviews(
                                     )
 
                                     if aria:
-
-                                        match = re.search(
+match = re.search(
     r"(\d)",
     aria
 )
