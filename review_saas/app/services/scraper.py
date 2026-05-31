@@ -1,7 +1,7 @@
 # =========================================================
 # FILE: app/services/scraper.py
-# QUANTUM ENTERPRISE GOOGLE REVIEW SCRAPER - VERSION 10.5
-# PRODUCTION GRADE - ACTUALLY EXTRACTS REVIEWS
+# QUANTUM ENTERPRISE GOOGLE REVIEW SCRAPER - VERSION 11.0
+# PRODUCTION GRADE WITH FULL DIAGNOSTICS
 # FULLY ALIGNED WITH review.py - NO BREAKING CHANGES
 # =========================================================
 
@@ -34,7 +34,7 @@ from dataclasses import dataclass, field, asdict
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-print("🚀 QUANTUM ENTERPRISE SCRAPER V10.5 BOOTING - PRODUCTION GRADE")
+print("🚀 QUANTUM ENTERPRISE SCRAPER V11.0 BOOTING - PRODUCTION GRADE")
 
 # =========================================================
 # CACHE (Maintained for compatibility)
@@ -61,11 +61,12 @@ class QuantumMemory:
             "SELECTOR_STATE": {},
             "PROVIDER_STATS": {},
             "PROXY_HEALTH": {},
-            "COOLDOWN_PROXIES": {}  # NEW: Track cooldown proxies
+            "COOLDOWN_PROXIES": {}
         }
         self.redis_client = None
         self.pg_conn = None
         self._init_persistence()
+        self._load_selector_state()  # Priority 5: Load selector stats on startup
     
     def _init_persistence(self):
         """Initialize Redis and PostgreSQL connections if available"""
@@ -115,9 +116,50 @@ class QuantumMemory:
                         timestamp TIMESTAMP DEFAULT NOW()
                     )
                 """)
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS selector_performance (
+                        selector TEXT PRIMARY KEY,
+                        success_count INTEGER DEFAULT 0,
+                        fail_count INTEGER DEFAULT 0,
+                        last_used TIMESTAMP DEFAULT NOW()
+                    )
+                """)
                 self.pg_conn.commit()
         except Exception as e:
             logger.warning(f"PostgreSQL schema init failed: {e}")
+    
+    def _load_selector_state(self):
+        """Priority 5: Load existing selector stats from persistence"""
+        if self.redis_client:
+            try:
+                keys = self.redis_client.keys("selector:*")
+                for key in keys:
+                    selector = key.replace("selector:", "")
+                    data = self.redis_client.hgetall(key)
+                    if data:
+                        self.in_memory["SELECTOR_STATE"][selector] = {
+                            "success": int(data.get("success", 0)),
+                            "fail": int(data.get("fail", 0))
+                        }
+                if self.in_memory["SELECTOR_STATE"]:
+                    logger.info(f"✅ Loaded {len(self.in_memory['SELECTOR_STATE'])} selector stats from Redis")
+            except Exception as e:
+                logger.debug(f"Could not load selector stats from Redis: {e}")
+        
+        elif self.pg_conn:
+            try:
+                with self.pg_conn.cursor() as cur:
+                    cur.execute("SELECT selector, success_count, fail_count FROM selector_performance")
+                    rows = cur.fetchall()
+                    for row in rows:
+                        self.in_memory["SELECTOR_STATE"][row[0]] = {
+                            "success": row[1],
+                            "fail": row[2]
+                        }
+                if self.in_memory["SELECTOR_STATE"]:
+                    logger.info(f"✅ Loaded {len(self.in_memory['SELECTOR_STATE'])} selector stats from PostgreSQL")
+            except Exception as e:
+                logger.debug(f"Could not load selector stats from PostgreSQL: {e}")
     
     def get(self, key: str, default=None):
         parts = key.split(".")
@@ -137,6 +179,26 @@ class QuantumMemory:
                 current[part] = {}
             current = current[part]
         current[parts[-1]] = value
+        
+        # Persist to Redis if available
+        if self.redis_client and key.startswith("SELECTOR_STATE."):
+            selector = key.replace("SELECTOR_STATE.", "")
+            self.redis_client.hset(f"selector:{selector}", mapping=value)
+        elif self.pg_conn and key.startswith("SELECTOR_STATE."):
+            selector = key.replace("SELECTOR_STATE.", "")
+            try:
+                with self.pg_conn.cursor() as cur:
+                    cur.execute("""
+                        INSERT INTO selector_performance (selector, success_count, fail_count)
+                        VALUES (%s, %s, %s)
+                        ON CONFLICT (selector) 
+                        DO UPDATE SET success_count = selector_performance.success_count + %s,
+                                      fail_count = selector_performance.fail_count + %s
+                    """, (selector, value.get("success", 0), value.get("fail", 0), 
+                          value.get("success", 0), value.get("fail", 0)))
+                    self.pg_conn.commit()
+            except Exception as e:
+                logger.debug(f"Could not persist selector stats: {e}")
 
 quantum_memory = QuantumMemory()
 
@@ -219,9 +281,13 @@ HEADLESS_MODE = os.getenv("SCRAPER_HEADLESS", "true").lower() == "true"
 USER_DATA_DIR = os.getenv("USER_DATA_DIR", "/tmp/google_profile")
 Path(USER_DATA_DIR).mkdir(parents=True, exist_ok=True)
 
-# Debug directory for HTML/screenshot dumps
+# Debug directory for categorized screenshots
 DEBUG_DIR = os.getenv("DEBUG_DIR", "/tmp/scraper_debug")
 Path(DEBUG_DIR).mkdir(parents=True, exist_ok=True)
+Path(f"{DEBUG_DIR}/captcha").mkdir(parents=True, exist_ok=True)
+Path(f"{DEBUG_DIR}/review_panel_missing").mkdir(parents=True, exist_ok=True)
+Path(f"{DEBUG_DIR}/review_cards_missing").mkdir(parents=True, exist_ok=True)
+Path(f"{DEBUG_DIR}/success").mkdir(parents=True, exist_ok=True)
 
 # =========================================================
 # PROXY CONFIGURATION
@@ -233,7 +299,7 @@ PROXY_PASSWORD = os.getenv("PROXY_PASSWORD", "").strip()
 
 PROXY_POOL = []
 FAILED_PROXIES = set()
-COOLDOWN_PROXIES = {}  # NEW: Track proxies in cooldown
+COOLDOWN_PROXIES = {}
 
 if PROXY_SERVER:
     proxy_config = {"server": f"http://{PROXY_SERVER}"}
@@ -251,14 +317,14 @@ logger.info(f"✅ PROXY COUNT => {len(PROXY_POOL)}")
 SCRAPER_SEMAPHORE = asyncio.Semaphore(2)
 
 # =========================================================
-# PROVIDER ANNEALING - REAL IMPLEMENTATION (NEW)
+# PROVIDER ANNEALING - PRIORITY 10 (Crawl4AI as fallback only)
 # =========================================================
 
 class ProviderAnnealer:
-    """Real provider annealing with actual execution control"""
+    """Provider annealing - Patchright primary, Crawl4AI fallback"""
     
     def __init__(self):
-        self.provider_stats = defaultdict(lambda: {"success": 0, "fail": 0, "reviews": []})
+        self.provider_stats = defaultdict(lambda: {"success": 0, "fail": 0})
         self._load_stats()
     
     def _load_stats(self):
@@ -268,48 +334,26 @@ class ProviderAnnealer:
             if stats:
                 self.provider_stats[provider] = stats
     
-    def get_provider_score(self, provider: str) -> float:
-        """Calculate provider score based on historical success"""
-        stats = self.provider_stats.get(provider, {"success": 0, "fail": 0})
-        total = stats["success"] + stats["fail"]
-        if total == 0:
-            return 0.5  # Neutral starting score
-        return stats["success"] / total
-    
-    def get_best_provider(self) -> str:
-        """Return best provider based on annealing"""
-        scores = {p: self.get_provider_score(p) for p in ["patchright", "crawl4ai"]}
-        
-        # Exploration rate: 20% chance to try non-best provider
-        if random.random() < 0.2:
-            return random.choice(["patchright", "crawl4ai"])
-        
-        # Exploit: return best provider
-        return max(scores, key=scores.get)
+    def should_use_fallback(self, reviews_count: int) -> bool:
+        """Priority 10: Only use Crawl4AI if Patchright returns 0 reviews"""
+        return reviews_count == 0
     
     def update_provider_stats(self, provider: str, success: bool, reviews_count: int):
         """Update provider statistics"""
         if provider not in self.provider_stats:
-            self.provider_stats[provider] = {"success": 0, "fail": 0, "reviews": []}
+            self.provider_stats[provider] = {"success": 0, "fail": 0}
         
-        if success:
+        if success and reviews_count > 0:
             self.provider_stats[provider]["success"] += 1
         else:
             self.provider_stats[provider]["fail"] += 1
         
-        self.provider_stats[provider]["reviews"].append(reviews_count)
-        if len(self.provider_stats[provider]["reviews"]) > 100:
-            self.provider_stats[provider]["reviews"] = self.provider_stats[provider]["reviews"][-100:]
-        
-        # Persist to quantum memory
         quantum_memory.set(f"PROVIDER_STATS.{provider}", self.provider_stats[provider])
-        
-        logger.info(f"📊 Provider {provider} score: {self.get_provider_score(provider):.2f}")
 
 provider_annealer = ProviderAnnealer()
 
 # =========================================================
-# PROXY COOLDOWN (NEW)
+# PROXY COOLDOWN
 # =========================================================
 
 def is_proxy_in_cooldown(proxy_server: str) -> bool:
@@ -319,10 +363,8 @@ def is_proxy_in_cooldown(proxy_server: str) -> bool:
     
     cooldown_until = COOLDOWN_PROXIES[proxy_server]
     if time.time() < cooldown_until:
-        logger.warning(f"⚠️ Proxy {proxy_server} in cooldown until {datetime.fromtimestamp(cooldown_until)}")
         return True
     else:
-        # Cooldown expired
         del COOLDOWN_PROXIES[proxy_server]
         return False
 
@@ -353,6 +395,10 @@ async def quantum_delay():
 def maps_url(place_id: str) -> str:
     return f"https://www.google.com/maps/place/?q=place_id:{place_id}"
 
+def fallback_reviews_url(place_id: str) -> str:
+    """Priority 6: Fallback URL for Google Reviews"""
+    return f"https://search.google.com/local/reviews?placeid={place_id}"
+
 def get_user_agent():
     static_agents = [
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36",
@@ -366,22 +412,74 @@ def get_user_agent():
     return random.choice(static_agents)
 
 # =========================================================
-# ENHANCED CAPTCHA DETECTION - PHASE 6
+# ENHANCED PAGE STATE DIAGNOSTICS - PRIORITY 1
 # =========================================================
 
-def detect_captcha(html: str):
-    html_lower = html.lower()
-    patterns = [
-        "captcha",
-        "unusual traffic",
-        "not a robot",
-        "sorry",
-        "verify you are human",  # NEW
-        "security check",         # NEW
-        "access denied",          # NEW
-        "automated queries"       # NEW
-    ]
-    return any(p in html_lower for p in patterns)
+async def diagnose_page_state(page) -> Dict[str, Any]:
+    """Comprehensive page state diagnostics"""
+    try:
+        title = await page.title()
+        url = page.url
+        content = await page.content()
+        body_length = len(content)
+        
+        # Detect page type
+        page_type = "UNKNOWN"
+        if "captcha" in content.lower() or "unusual traffic" in content.lower():
+            page_type = "CAPTCHA"
+        elif "sorry" in content.lower() or "verify you are human" in content.lower():
+            page_type = "BLOCKED"
+        elif "google.com/maps" in url:
+            page_type = "GOOGLE_MAPS"
+        elif "search.google.com/local/reviews" in url:
+            page_type = "REVIEWS_PAGE"
+        
+        # Log everything
+        logger.info(f"📊 PAGE TITLE => {title}")
+        logger.info(f"📊 PAGE URL => {url}")
+        logger.info(f"📊 PAGE TYPE => {page_type}")
+        logger.info(f"📊 BODY LENGTH => {body_length} bytes")
+        
+        # Check for no reviews message - Priority 9
+        no_reviews_indicators = [
+            "No reviews",
+            "Be the first to review",
+            "no reviews yet",
+            "haven't been reviewed"
+        ]
+        
+        has_no_reviews = any(indicator.lower() in content.lower() for indicator in no_reviews_indicators)
+        if has_no_reviews:
+            logger.info("📊 BUSINESS HAS NO REVIEWS")
+        
+        return {
+            "title": title,
+            "url": url,
+            "page_type": page_type,
+            "body_length": body_length,
+            "has_no_reviews": has_no_reviews,
+            "is_captcha": page_type == "CAPTCHA",
+            "is_blocked": page_type == "BLOCKED"
+        }
+    except Exception as e:
+        logger.error(f"❌ Page diagnosis error: {e}")
+        return {"page_type": "ERROR", "error": str(e)}
+
+# =========================================================
+# CATEGORIZED SCREENSHOTS - PRIORITY 8
+# =========================================================
+
+async def take_categorized_screenshot(page, place_id: str, category: str):
+    """Take categorized screenshot for easier debugging"""
+    try:
+        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        filename = f"{DEBUG_DIR}/{category}/{place_id}_{timestamp}.png"
+        await page.screenshot(path=filename, full_page=True)
+        logger.info(f"📸 Screenshot saved: {category} -> {filename}")
+        return filename
+    except Exception as e:
+        logger.error(f"❌ Screenshot error: {e}")
+        return None
 
 # =========================================================
 # PROXY SCORING
@@ -390,7 +488,7 @@ def detect_captcha(html: str):
 def get_advanced_proxy_score(proxy_server: str) -> float:
     """Advanced proxy scoring with cooldown awareness"""
     if is_proxy_in_cooldown(proxy_server):
-        return -1.0  # Effectively disables this proxy
+        return -1.0
     
     stats = quantum_memory.get(f"PROXY_HEALTH.{proxy_server}", {"success": 1, "fail": 1, "captcha": 0})
     
@@ -426,7 +524,6 @@ def update_proxy_score(proxy_server: str, success: bool, captcha: bool = False):
         stats["fail"] += 1
         stats["failures_streak"] = stats.get("failures_streak", 0) + 1
         
-        # Apply cooldown after 5 consecutive failures
         if stats["failures_streak"] >= 5:
             apply_proxy_cooldown(proxy_server, stats["failures_streak"])
     
@@ -436,19 +533,25 @@ def update_proxy_score(proxy_server: str, success: bool, captcha: bool = False):
     quantum_memory.set(stats_key, stats)
 
 # =========================================================
-# SELECTOR OPTIMIZER
+# SELECTOR OPTIMIZER - WITH PERSISTENCE (PRIORITY 5 FIXED)
 # =========================================================
 
 class SelectorOptimizer:
-    """Self-healing selector system"""
+    """Self-healing selector system with persistence"""
     def __init__(self):
-        self.selector_stats = defaultdict(lambda: {"success": 0, "fail": 0})
+        # Load from quantum memory (already loaded in QuantumMemory.__init__)
+        self.selector_stats = quantum_memory.get("SELECTOR_STATE", {})
+        logger.info(f"✅ SelectorOptimizer loaded with {len(self.selector_stats)} existing selectors")
     
     def update(self, selector: str, success: bool):
+        if selector not in self.selector_stats:
+            self.selector_stats[selector] = {"success": 0, "fail": 0}
+        
         if success:
             self.selector_stats[selector]["success"] += 1
         else:
             self.selector_stats[selector]["fail"] += 1
+        
         quantum_memory.set(f"SELECTOR_STATE.{selector}", self.selector_stats[selector])
     
     def get_success_rate(self, selector: str) -> float:
@@ -462,7 +565,7 @@ class SelectorOptimizer:
 selector_optimizer = SelectorOptimizer()
 
 # =========================================================
-# REVIEW NORMALIZATION - ENHANCED WITH MORE FIELDS (PHASE 8)
+# REVIEW NORMALIZATION
 # =========================================================
 
 def generate_review_id(place_id: str, author: str, text: str, date: str = ""):
@@ -486,7 +589,6 @@ def normalize_review(review: Dict[str, Any], place_id: str):
             rating = 5
         rating = max(1, min(rating, 5))
         
-        # NEW: Extract additional fields
         review_date = review.get("review_date", "")
         owner_response = review.get("owner_response", "")
         owner_response_date = review.get("owner_response_date", "")
@@ -502,12 +604,12 @@ def normalize_review(review: Dict[str, Any], place_id: str):
             "review_text": review_text,
             "content": review_text,
             "text": review_text,
-            "review_date": review_date,  # NEW
-            "owner_response": owner_response,  # NEW
-            "owner_response_date": owner_response_date,  # NEW
-            "likes_count": likes_count,  # NEW
-            "is_local_guide": is_local_guide,  # NEW
-            "author_review_count": author_review_count,  # NEW
+            "review_date": review_date,
+            "owner_response": owner_response,
+            "owner_response_date": owner_response_date,
+            "likes_count": likes_count,
+            "is_local_guide": is_local_guide,
+            "author_review_count": author_review_count,
             "sentiment_score": 0.5,
             "google_review_time": utc_now() if not review_date else review_date,
             "scraped_at": utc_now()
@@ -528,175 +630,11 @@ def deduplicate_reviews(reviews: List[Dict]):
     return unique
 
 # =========================================================
-# HTML & SCREENSHOT DEBUGGING - PHASE 1
+# ENHANCED REVIEW BUTTON DETECTION - PRIORITY 2
 # =========================================================
 
-async def debug_dump(page, place_id: str, stage: str):
-    """Dump HTML and screenshot when reviews are not found"""
-    try:
-        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-        filename_base = f"{DEBUG_DIR}/{place_id}_{stage}_{timestamp}"
-        
-        # Dump HTML
-        html = await page.content()
-        html_path = f"{filename_base}.html"
-        with open(html_path, "w", encoding="utf-8") as f:
-            f.write(html)
-        logger.info(f"📄 HTML dumped to {html_path}")
-        
-        # Dump screenshot
-        screenshot_path = f"{filename_base}.png"
-        await page.screenshot(path=screenshot_path, full_page=True)
-        logger.info(f"📸 Screenshot saved to {screenshot_path}")
-        
-        # Log page title and URL
-        title = await page.title()
-        url = page.url
-        logger.info(f"📊 PAGE TITLE => {title}")
-        logger.info(f"📊 PAGE URL => {url}")
-        
-        return True
-    except Exception as e:
-        logger.error(f"❌ Debug dump error: {e}")
-        return False
-
-# =========================================================
-# CONSENSUS ENGINE
-# =========================================================
-
-async def consensus_engine(html: str, place_id: str) -> List[Dict]:
-    """Run multiple parsers, accept reviews if 2 of 3 agree"""
-    
-    parser_results = {}
-    
-    # Parser 1: Selectolax
-    if SELECTOLAX_AVAILABLE:
-        try:
-            parser = HTMLParser(html)
-            reviews = []
-            review_nodes = parser.css('div.jftiEf, div[data-review-id], div.MyEned, div[role="article"], div[class*="review"]')
-            
-            for node in review_nodes[:MAX_REVIEWS]:
-                author_node = node.css_first('.d4r55, .TSUbDb, span[class*="author"]')
-                author = author_node.text(strip=True) if author_node else "Anonymous"
-                
-                text_node = node.css_first('.wiI7pd, .MyEned, span[jsname]')
-                text = text_node.text(strip=True) if text_node else ""
-                
-                rating = 5
-                rating_node = node.css_first('span.kvMYJc')
-                if rating_node and rating_node.attributes.get('aria-label'):
-                    match = re.search(r'(\d)', rating_node.attributes['aria-label'])
-                    if match:
-                        rating = int(match.group(1))
-                
-                # Extract date
-                date_node = node.css_first('.rsqaWe, .DeaRdd')
-                date = date_node.text(strip=True) if date_node else ""
-                
-                normalized = normalize_review({
-                    "author": author, 
-                    "rating": rating, 
-                    "review_text": text,
-                    "review_date": date
-                }, place_id)
-                if normalized:
-                    reviews.append(normalized)
-            
-            parser_results["selectolax"] = reviews
-        except Exception as e:
-            logger.error(f"❌ Selectolax consensus error: {e}")
-    
-    # Parser 2: BeautifulSoup
-    if BS4_AVAILABLE:
-        try:
-            soup = BeautifulSoup(html, 'html.parser')
-            reviews = []
-            review_elements = soup.select('div.jftiEf, div[data-review-id], div.MyEned, div[role="article"], div[class*="review"]')
-            
-            for elem in review_elements[:MAX_REVIEWS]:
-                author_elem = elem.select_one('.d4r55, .TSUbDb, span[class*="author"]')
-                author = author_elem.get_text(strip=True) if author_elem else "Anonymous"
-                
-                text_elem = elem.select_one('.wiI7pd, .MyEned, span[jsname]')
-                text = text_elem.get_text(strip=True) if text_elem else ""
-                
-                rating = 5
-                rating_elem = elem.select_one('span.kvMYJc')
-                if rating_elem and rating_elem.get('aria-label'):
-                    match = re.search(r'(\d)', rating_elem['aria-label'])
-                    if match:
-                        rating = int(match.group(1))
-                
-                date_elem = elem.select_one('.rsqaWe, .DeaRdd')
-                date = date_elem.get_text(strip=True) if date_elem else ""
-                
-                normalized = normalize_review({
-                    "author": author, 
-                    "rating": rating, 
-                    "review_text": text,
-                    "review_date": date
-                }, place_id)
-                if normalized:
-                    reviews.append(normalized)
-            
-            parser_results["beautifulsoup"] = reviews
-        except Exception as e:
-            logger.error(f"❌ BeautifulSoup consensus error: {e}")
-    
-    # Consensus: Accept if at least 2 parsers agree
-    review_votes = defaultdict(lambda: {"votes": 0, "review": None})
-    
-    for parser_name, reviews in parser_results.items():
-        for review in reviews:
-            review_id = review.get("google_review_id")
-            if review_id not in review_votes:
-                review_votes[review_id]["review"] = review
-            review_votes[review_id]["votes"] += 1
-    
-    consensus_reviews = [data["review"] for data in review_votes.values() if data["votes"] >= 2]
-    
-    logger.info(f"✅ CONSENSUS ENGINE: {len(consensus_reviews)} reviews from {len(parser_results)} parsers")
-    return consensus_reviews
-
-# =========================================================
-# REVIEW SCROLLING - FIXED (PHASE 2)
-# =========================================================
-
-async def scroll_reviews_page(page):
-    """Improved scrolling using the correct .m6QErb panel"""
-    try:
-        # THIS IS THE FIX - Use .m6QErb instead of [role="main"]
-        scrolled = await page.evaluate("""
-            () => {
-                const panel = document.querySelector('.m6QErb');
-                if (panel) {
-                    const previousHeight = panel.scrollHeight;
-                    panel.scrollTop = panel.scrollHeight;
-                    return { success: true, previousHeight, newHeight: panel.scrollHeight };
-                }
-                
-                // Fallback to older selector
-                const panels = document.querySelectorAll('[role="main"]');
-                for (const p of panels) {
-                    const previousHeight = p.scrollHeight;
-                    p.scrollTop = p.scrollHeight;
-                    return { success: true, previousHeight, newHeight: p.scrollHeight };
-                }
-                return { success: false };
-            }
-        """)
-        return scrolled.get('success', False) if isinstance(scrolled, dict) else False
-    except Exception as e:
-        logger.error(f"❌ Scroll error: {e}")
-        return False
-
-# =========================================================
-# ENHANCED REVIEW BUTTON DETECTION (PHASE 3)
-# =========================================================
-
-async def click_reviews_button(page):
-    """Enhanced review button detection with more selectors"""
+async def click_reviews_button(page) -> bool:
+    """Enhanced review button detection with verification"""
     
     review_button_selectors = [
         'button[jsaction*="pane.reviewChart.moreReviews"]',
@@ -706,14 +644,13 @@ async def click_reviews_button(page):
         'button[jsaction*="reviews"]',
         'button[data-tab-index="1"]',
         '[role="tab"][aria-label*="Reviews"]',
-        '[data-value="Reviews"]',  # NEW
-        'button[jsaction*="pane.rating.moreReviews"]',  # NEW
-        'button[aria-label*="Google reviews"]',  # NEW
-        'button[role="tab"]',  # NEW
-        'a[aria-label*="reviews"]'  # NEW
+        '[data-value="Reviews"]',
+        'button[jsaction*="pane.rating.moreReviews"]',
+        'button[aria-label*="Google reviews"]',
+        'button[role="tab"]',
+        'a[aria-label*="reviews"]'
     ]
     
-    # Sort by historical success rate
     sorted_selectors = selector_optimizer.sort_by_success_rate(review_button_selectors)
     
     for selector in sorted_selectors:
@@ -723,6 +660,11 @@ async def click_reviews_button(page):
                 await locator.click()
                 selector_optimizer.update(selector, True)
                 logger.info(f"✅ CLICKED REVIEW BUTTON => {selector}")
+                
+                # Priority 2: Wait and log URL after click
+                await page.wait_for_timeout(5000)
+                logger.info(f"📊 URL AFTER CLICK => {page.url}")
+                
                 return True
         except Exception as e:
             selector_optimizer.update(selector, False)
@@ -732,11 +674,77 @@ async def click_reviews_button(page):
     return False
 
 # =========================================================
-# EXPAND TRUNCATED REVIEWS (PHASE 5)
+# REVIEW PANEL DETECTION - PRIORITY 3
 # =========================================================
 
-async def expand_truncated_reviews(page):
-    """Expand all truncated reviews by clicking More/Read more buttons"""
+async def verify_review_panel(page) -> bool:
+    """Verify that review panel exists before scrolling"""
+    try:
+        panel_exists = await page.evaluate("""
+            () => {
+                const panel = document.querySelector('.m6QErb');
+                if (panel) return true;
+                const panels = document.querySelectorAll('[role="main"]');
+                return panels.length > 0;
+            }
+        """)
+        
+        logger.info(f"📊 REVIEW PANEL FOUND => {panel_exists}")
+        
+        if not panel_exists:
+            await take_categorized_screenshot(page, "unknown", "review_panel_missing")
+        
+        return panel_exists
+    except Exception as e:
+        logger.error(f"❌ Panel verification error: {e}")
+        return False
+
+# =========================================================
+# REVIEW SCROLLING - FIXED
+# =========================================================
+
+async def scroll_reviews_page(page) -> int:
+    """Improved scrolling using the correct .m6QErb panel"""
+    scroll_count = 0
+    try:
+        for _ in range(30):  # Max 30 scroll attempts
+            result = await page.evaluate("""
+                () => {
+                    const panel = document.querySelector('.m6QErb');
+                    if (panel) {
+                        const previousHeight = panel.scrollHeight;
+                        panel.scrollTop = panel.scrollHeight;
+                        return { success: true, previousHeight, newHeight: panel.scrollHeight };
+                    }
+                    
+                    const panels = document.querySelectorAll('[role="main"]');
+                    for (const p of panels) {
+                        const previousHeight = p.scrollHeight;
+                        p.scrollTop = p.scrollHeight;
+                        return { success: true, previousHeight, newHeight: p.scrollHeight };
+                    }
+                    return { success: false };
+                }
+            """)
+            
+            if isinstance(result, dict) and result.get('success'):
+                scroll_count += 1
+                await asyncio.sleep(1.5)
+            else:
+                break
+        
+        logger.info(f"📊 SCROLL COUNT => {scroll_count}")
+        return scroll_count
+    except Exception as e:
+        logger.error(f"❌ Scroll error: {e}")
+        return scroll_count
+
+# =========================================================
+# EXPAND TRUNCATED REVIEWS
+# =========================================================
+
+async def expand_truncated_reviews(page) -> int:
+    """Expand all truncated reviews"""
     try:
         expand_selectors = [
             'button:has-text("More")',
@@ -744,8 +752,8 @@ async def expand_truncated_reviews(page):
             'span:has-text("More")',
             'button:has-text("Read more")',
             'span:has-text("Read more")',
-            'span.w8nwRe',  # NEW
-            'button[jsaction*="expand"]'  # NEW
+            'span.w8nwRe',
+            'button[jsaction*="expand"]'
         ]
         
         expanded_count = 0
@@ -771,167 +779,160 @@ async def expand_truncated_reviews(page):
         return 0
 
 # =========================================================
-# ENHANCED REVIEW CARD PARSING (PHASE 4 & 8)
+# DOM SNAPSHOT BEFORE PARSING - PRIORITY 4
 # =========================================================
 
-async def parse_review_card(card, place_id: str) -> Optional[Dict]:
-    """Parse a single review card with all metadata"""
+async def get_review_card_count(page) -> int:
+    """Get raw review card count before parsing"""
     try:
-        # Basic fields
-        author = "Anonymous"
-        author_selectors = [".d4r55", ".TSUbDb", "span[class*=author]", "a[class*=author]"]
-        for sel in author_selectors:
-            if await card.locator(sel).count() > 0:
-                author = (await card.locator(sel).first.inner_text()).strip()
-                break
+        selectors_to_try = [
+            'div[data-review-id]',
+            'div.jftiEf',
+            'div.MyEned',
+            'div[role="article"]',
+            'div[class*="review"]'
+        ]
         
-        text = ""
-        text_selectors = [".wiI7pd", ".MyEned", "span[jsname]", "div[class*=review-text]"]
-        for sel in text_selectors:
-            if await card.locator(sel).count() > 0:
-                text = (await card.locator(sel).first.inner_text()).strip()
-                break
+        for selector in selectors_to_try:
+            count = await page.locator(selector).count()
+            if count > 0:
+                logger.info(f"📊 RAW REVIEW CARDS => {count} (using selector: {selector})")
+                return count
         
-        rating = 5
-        if await card.locator("span.kvMYJc").count() > 0:
-            aria = await card.locator("span.kvMYJc").get_attribute("aria-label")
-            if aria:
-                match = re.search(r"(\d)", aria)
-                if match:
-                    rating = int(match.group(1))
-        
-        # NEW: Review date
-        date = ""
-        date_selectors = [".rsqaWe", ".DeaRdd", "span[class*=date]"]
-        for sel in date_selectors:
-            if await card.locator(sel).count() > 0:
-                date = (await card.locator(sel).first.inner_text()).strip()
-                break
-        
-        # NEW: Likes count
-        likes_count = 0
-        likes_selectors = ['button[jsaction*="like"]', '.PKRcHd']
-        for sel in likes_selectors:
-            if await card.locator(sel).count() > 0:
-                likes_text = await card.locator(sel).first.inner_text()
-                likes_match = re.search(r'(\d+)', likes_text)
-                if likes_match:
-                    likes_count = int(likes_match.group(1))
-                break
-        
-        # NEW: Local guide badge
-        is_local_guide = False
-        local_guide_selectors = ['img[alt*="Local Guide"]', '.local-guide-badge']
-        for sel in local_guide_selectors:
-            if await card.locator(sel).count() > 0:
-                is_local_guide = True
-                break
-        
-        # NEW: Author review count
-        author_review_count = 0
-        review_count_selectors = ['.RfnDt', '.review-count']
-        for sel in review_count_selectors:
-            if await card.locator(sel).count() > 0:
-                count_text = await card.locator(sel).first.inner_text()
-                count_match = re.search(r'(\d+)', count_text)
-                if count_match:
-                    author_review_count = int(count_match.group(1))
-                break
-        
-        # NEW: Owner response
-        owner_response = ""
-        owner_response_date = ""
-        owner_selectors = ['[jsname="bN97Pc"]', '.CDe7pd']
-        for sel in owner_selectors:
-            if await card.locator(sel).count() > 0:
-                owner_response = (await card.locator(sel).first.inner_text()).strip()
-                # Try to get owner response date
-                date_elem = card.locator(f'{sel} + div .DeaRdd, {sel} + .DeaRdd')
-                if await date_elem.count() > 0:
-                    owner_response_date = (await date_elem.first.inner_text()).strip()
-                break
-        
-        return normalize_review({
-            "author": author,
-            "rating": rating,
-            "review_text": text,
-            "review_date": date,
-            "owner_response": owner_response,
-            "owner_response_date": owner_response_date,
-            "likes_count": likes_count,
-            "is_local_guide": is_local_guide,
-            "author_review_count": author_review_count
-        }, place_id)
-        
+        logger.warning("📊 RAW REVIEW CARDS => 0")
+        return 0
     except Exception as e:
-        logger.error(f"❌ Review card parse error: {e}")
-        return None
+        logger.error(f"❌ Card count error: {e}")
+        return 0
 
 # =========================================================
-# PATCHRIGHT PROVIDER - FULLY ENHANCED
+# TRUE CONSENSUS ENGINE - PRIORITY 7 (Playwright DOM + Selectolax + BeautifulSoup)
 # =========================================================
 
-@backoff.on_exception(backoff.expo, Exception, max_time=300)
-async def patchright_reviews(place_id: str) -> List[Dict]:
-    """Enhanced Patchright with all improvements"""
-    reviews = []
+async def true_consensus_engine(page, place_id: str) -> List[Dict]:
+    """True 2-of-3 consensus using Playwright DOM + Selectolax + BeautifulSoup"""
     
-    if not PATCHRIGHT_AVAILABLE:
-        logger.error("❌ PATCHRIGHT NOT AVAILABLE")
-        return reviews
+    results = {}
     
-    async with SCRAPER_SEMAPHORE:
-        context = None
+    # Source 1: Playwright DOM (live browser)
+    try:
+        playwright_reviews = []
+        review_cards = await page.locator('div[data-review-id], div.jftiEf, div.MyEned').all()
         
-        for attempt in range(3):
-            proxy = get_best_proxy()
-            start_time = time.time()
-            
+        for card in review_cards[:MAX_REVIEWS]:
             try:
-                logger.info(f"🔥 PATCHRIGHT ATTEMPT => {attempt+1}")
-                logger.info(f"🔥 ACTIVE PROXY => {proxy['server'] if proxy else 'None'}")
+                author = "Anonymous"
+                for sel in ['.d4r55', '.TSUbDb', 'span[class*=author]']:
+                    if await card.locator(sel).count() > 0:
+                        author = (await card.locator(sel).first.inner_text()).strip()
+                        break
                 
-                async with async_playwright() as p:
-                    context = await p.chromium.launch_persistent_context(
-                        user_data_dir=USER_DATA_DIR,
-                        headless=HEADLESS_MODE,
-                        proxy=proxy,
-                        channel="chrome",
-                        args=[
-                            "--disable-blink-features=AutomationControlled",
-                            "--disable-dev-shm-usage",
-                            "--disable-gpu",
-                            "--window-size=1920,1080",
-                            "--no-sandbox",
-                            "--disable-web-security",
-                            "--disable-features=IsolateOrigins,site-per-process",
-                            "--disable-site-isolation-trials",
-                            "--disable-infobars",
-                            "--start-maximized",
-                            "--disable-extensions",
-                            "--disable-popup-blocking"
-                        ],
-                        user_agent=get_user_agent(),
-                        locale="en-US",
-                        timezone_id="America/New_York",
-                        java_script_enabled=True,
-                        ignore_https_errors=True,
-                        viewport={
-                            "width": random.randint(1366, 1920),
-                            "height": random.randint(768, 1080)
-                        }
-                    )
-                    
-                    page = context.pages[0] if context.pages else await context.new_page()
-                    
-                    await page.add_init_script("""
-                        Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-                    """)
-                    
-                    if STEALTH_AVAILABLE:
-                        try:
-                            await stealth_async(page)
-                        except Exception:
-                            pass
-                    
-                   
+                text = ""
+                for sel in ['.wiI7pd', '.MyEned', 'span[jsname]']:
+                    if await card.locator(sel).count() > 0:
+                        text = (await card.locator(sel).first.inner_text()).strip()
+                        break
+                
+                rating = 5
+                if await card.locator('span.kvMYJc').count() > 0:
+                    aria = await card.locator('span.kvMYJc').get_attribute('aria-label')
+                    if aria:
+                        match = re.search(r'(\d)', aria)
+                        if match:
+                            rating = int(match.group(1))
+                
+                date = ""
+                for sel in ['.rsqaWe', '.DeaRdd']:
+                    if await card.locator(sel).count() > 0:
+                        date = (await card.locator(sel).first.inner_text()).strip()
+                        break
+                
+                normalized = normalize_review({
+                    "author": author, "rating": rating, "review_text": text, "review_date": date
+                }, place_id)
+                if normalized:
+                    playwright_reviews.append(normalized)
+            except:
+                continue
+        
+        results["playwright"] = playwright_reviews
+        logger.info(f"📊 PLAYWRIGHT DOM REVIEWS => {len(playwright_reviews)}")
+    except Exception as e:
+        logger.error(f"❌ Playwright DOM extraction error: {e}")
+    
+    # Source 2 & 3: Selectolax and BeautifulSoup on HTML
+    html = await page.content()
+    
+    if SELECTOLAX_AVAILABLE:
+        try:
+            parser = HTMLParser(html)
+            selectolax_reviews = []
+            review_nodes = parser.css('div[data-review-id], div.jftiEf, div.MyEned')
+            
+            for node in review_nodes[:MAX_REVIEWS]:
+                author_node = node.css_first('.d4r55, .TSUbDb')
+                author = author_node.text(strip=True) if author_node else "Anonymous"
+                
+                text_node = node.css_first('.wiI7pd, .MyEned')
+                text = text_node.text(strip=True) if text_node else ""
+                
+                rating = 5
+                rating_node = node.css_first('span.kvMYJc')
+                if rating_node and rating_node.attributes.get('aria-label'):
+                    match = re.search(r'(\d)', rating_node.attributes['aria-label'])
+                    if match:
+                        rating = int(match.group(1))
+                
+                date_node = node.css_first('.rsqaWe, .DeaRdd')
+                date = date_node.text(strip=True) if date_node else ""
+                
+                normalized = normalize_review({
+                    "author": author, "rating": rating, "review_text": text, "review_date": date
+                }, place_id)
+                if normalized:
+                    selectolax_reviews.append(normalized)
+            
+            results["selectolax"] = selectolax_reviews
+            logger.info(f"📊 SELECTOLAX REVIEWS => {len(selectolax_reviews)}")
+        except Exception as e:
+            logger.error(f"❌ Selectolax error: {e}")
+    
+    if BS4_AVAILABLE:
+        try:
+            soup = BeautifulSoup(html, 'html.parser')
+            bs4_reviews = []
+            review_elements = soup.select('div[data-review-id], div.jftiEf, div.MyEned')
+            
+            for elem in review_elements[:MAX_REVIEWS]:
+                author_elem = elem.select_one('.d4r55, .TSUbDb')
+                author = author_elem.get_text(strip=True) if author_elem else "Anonymous"
+                
+                text_elem = elem.select_one('.wiI7pd, .MyEned')
+                text = text_elem.get_text(strip=True) if text_elem else ""
+                
+                rating = 5
+                rating_elem = elem.select_one('span.kvMYJc')
+                if rating_elem and rating_elem.get('aria-label'):
+                    match = re.search(r'(\d)', rating_elem['aria-label'])
+                    if match:
+                        rating = int(match.group(1))
+                
+                date_elem = elem.select_one('.rsqaWe, .DeaRdd')
+                date = date_elem.get_text(strip=True) if date_elem else ""
+                
+                normalized = normalize_review({
+                    "author": author, "rating": rating, "review_text": text, "review_date": date
+                }, place_id)
+                if normalized:
+                    bs4_reviews.append(normalized)
+            
+            results["beautifulsoup"] = bs4_reviews
+            logger.info(f"📊 BEAUTIFULSOUP REVIEWS => {len(bs4_reviews)}")
+        except Exception as e:
+            logger.error(f"❌ BeautifulSoup error: {e}")
+    
+    # True 2-of-3 consensus
+    review_votes = defaultdict(lambda: {"votes": 0, "review": None})
+    
+    for source_name, reviews in results.items():
+        for review in
