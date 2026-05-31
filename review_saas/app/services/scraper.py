@@ -736,43 +736,24 @@ async def patchright_reviews(
                         ]
                     )
 
+                    # =========================================
+                    # FIX 1: SINGLE CLEAN new_context() CALL
+                    # (removed duplicate broken block)
+                    # =========================================
+
                     context = await browser.new_context(
-
-    user_agent=get_user_agent(),
-
-    locale="en-US",
-
-    timezone_id="America/New_York",
-
-    java_script_enabled=True,
-
-    ignore_https_errors=True,
-
-    permissions=[],
-
-    color_scheme="dark",
-
-    viewport={
-
-        "width":
-            random.randint(
-                1366,
-                1920
-            ),
-
-        "height":
-            random.randint(
-                768,
-                1080
-            )
-    }
-)
 
                         user_agent=get_user_agent(),
 
                         locale="en-US",
 
                         timezone_id="America/New_York",
+
+                        java_script_enabled=True,
+
+                        ignore_https_errors=True,
+
+                        permissions=[],
 
                         color_scheme="dark",
 
@@ -844,37 +825,27 @@ async def patchright_reviews(
                         "before_reviews"
                     )
 
-                   review_button_selectors = [
+                    # =========================================
+                    # FIX 2: SINGLE DEDUPLICATED SELECTOR LIST
+                    # (removed duplicate broken second list)
+                    # =========================================
 
-    'button[jsaction*="pane.reviewChart.moreReviews"]',
+                    review_button_selectors = [
 
-    'button[aria-label*="reviews"]',
+                        'button[jsaction*="pane.reviewChart.moreReviews"]',
 
-    'button[aria-label*="Reviews"]',
+                        'button[aria-label*="reviews"]',
 
-    'button[aria-label*="Review"]',
+                        'button[aria-label*="Reviews"]',
 
-    'button[jsaction*="reviews"]',
+                        'button[aria-label*="Review"]',
 
-    'button[data-tab-index="1"]',
+                        'button[jsaction*="reviews"]',
 
-    '[role="tab"][aria-label*="Reviews"]'
-]
+                        'button[data-tab-index="1"]',
 
-    'button[jsaction*="pane.reviewChart.moreReviews"]',
-
-    'button[aria-label*="reviews"]',
-
-    'button[aria-label*="Reviews"]',
-
-    'button[data-tab-index="1"]',
-
-    'button[aria-label*="Review"]',
-
-    'button[jsaction*="reviews"]',
-
-    '[role="tab"][aria-label*="Reviews"]'
-]
+                        '[role="tab"][aria-label*="Reviews"]'
+                    ]
 
                     clicked = False
 
@@ -1137,10 +1108,17 @@ async def patchright_reviews(
                                     )
 
                                     if aria:
-match = re.search(
-    r"(\d)",
-    aria
-)
+
+                                        # =====================
+                                        # FIX 3: CORRECT INDENT
+                                        # re.search properly
+                                        # nested inside if aria
+                                        # =====================
+
+                                        match = re.search(
+                                            r"(\d)",
+                                            aria
+                                        )
 
                                         if match:
 
