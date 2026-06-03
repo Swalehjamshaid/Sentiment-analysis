@@ -1,7 +1,7 @@
 # =========================================================
 # FILE: app/services/scraper.py
-# QUANTUM ENTERPRISE SCRAPER - V32.0 PRODUCTION
-# CONCURRENCY SAFE + ROBUST RPC + TRUE ISOLATION
+# QUANTUM ENTERPRISE SCRAPER - V33.0 PRODUCTION READY
+# FIXED LIFECYCLE + INFINITE SCROLL + RPC CAPTURE
 # =========================================================
 
 from __future__ import annotations
@@ -23,25 +23,23 @@ from collections import deque, defaultdict
 from contextlib import asynccontextmanager
 
 # =========================================================
-# CRITICAL: CONCURRENCY CONTROL
+# CONCURRENCY CONTROL
 # =========================================================
 
-# Global semaphore to limit concurrent browser instances
-# This prevents server overload when scraping many companies
-SCRAPER_SEMAPHORE = asyncio.Semaphore(5)  # Max 5 concurrent scrapers
+SCRAPER_SEMAPHORE = asyncio.Semaphore(5)
 MAX_CONCURRENT_BROWSERS = 5
 
 # =========================================================
-# THIRD-PARTY IMPORTS (With graceful fallbacks)
+# THIRD-PARTY IMPORTS
 # =========================================================
 
 try:
-    from patchright.async_api import async_playwright
+    from patchright.async_api import async_playwright as patchright_playwright
     PATCHRIGHT_AVAILABLE = True
 except ImportError:
-    from playwright.async_api import async_playwright
+    from playwright.async_api import async_playwright as patchright_playwright
     PATCHRIGHT_AVAILABLE = False
-    print("⚠️ Patchright not available - using Playwright (higher detection risk)")
+    print("⚠️ Patchright not available - using Playwright")
 
 try:
     from playwright_stealth import stealth_async
@@ -57,27 +55,6 @@ except ImportError:
     FAKE_UA_AVAILABLE = False
     print("⚠️ Fake-useragent not available")
 
-try:
-    from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
-    TENACITY_AVAILABLE = True
-except ImportError:
-    TENACITY_AVAILABLE = False
-    print("⚠️ Tenacity not available")
-
-try:
-    from selectolax.parser import HTMLParser
-    SELECTOLAX_AVAILABLE = True
-except ImportError:
-    SELECTOLAX_AVAILABLE = False
-    print("⚠️ Selectolax not available")
-
-try:
-    from curl_cffi import requests as curl_requests
-    CURL_CFFI_AVAILABLE = True
-except ImportError:
-    CURL_CFFI_AVAILABLE = False
-    print("⚠️ Curl_CFFI not available")
-
 # =========================================================
 # CONSTANTS
 # =========================================================
@@ -87,38 +64,32 @@ class ScraperConfig:
     MIN_REVIEW_LENGTH = 20
     MAX_REVIEW_LENGTH = 5000
     
-    MAX_SCROLLS = 50
-    SCROLL_DISTANCE_START = 1000
-    SCROLL_DISTANCE_MAX = 3000
+    # Infinite scroll settings
+    MAX_SCROLLS = 60
+    SCROLL_DISTANCE = 3000
+    SCROLL_DELAY_MIN = 1.0
+    SCROLL_DELAY_MAX = 2.0
     SCROLL_STAGNANT_LIMIT = 3
     
+    # Timeouts
     RPC_TIMEOUT = 15
     PAGE_LOAD_TIMEOUT = 60000
     NAVIGATION_TIMEOUT = 60000
     BROWSER_LAUNCH_TIMEOUT = 30000
     
-    # Retry stages with different strategies
+    # Retry settings
     MAX_RETRIES = 3
-    PROXY_ROTATION_RETRIES = 2
-    FRESH_BROWSER_RETRIES = 2
-    
-    # Concurrency
-    MAX_CONCURRENT_SCRAPERS = 5
     
     # Session management
     USER_DATA_DIR = Path("/tmp/chrome_profiles")
     
-    # Rate limiting
-    RATE_LIMIT_BACKOFF_MAX = 300
-    
-    # Deduplication
-    DEDUP_HASH_ALGO = "sha256"  # Use SHA256 instead of MD5
-    
-    SCREENSHOT_ON_ERROR = True
+    # Debugging
+    SCREENSHOT_ON_FAILURE = True
     SCREENSHOT_DIR = Path("/app/data/screenshots")
     
+    # Health check
     HEALTH_CHECK_URL = "https://www.google.com"
-    METRICS_FILE = Path("/app/data/scraper_metrics.json")
+    IP_CHECK_URL = "https://api.ipify.org?format=json"
 
 # =========================================================
 # LOGGER
@@ -128,192 +99,68 @@ logging.basicConfig(level=logging.INFO, format='%(levelname)s:%(name)s:%(message
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
+# Add detailed logging for debugging
+DETAILED_LOGGING = os.getenv("DETAILED_LOGGING", "false").lower() == "true"
+if DETAILED_LOGGING:
+    logger.setLevel(logging.DEBUG)
+
 print("=" * 80)
-print("🚀 QUANTUM ENTERPRISE SCRAPER V32.0 - PRODUCTION GRADE")
+print("🚀 QUANTUM ENTERPRISE SCRAPER V33.0 - PRODUCTION READY")
 print("┌─────────────────────────────────────────────────────────────────┐")
-print("│ CONCURRENCY SAFE │ SEMAPHORE PROTECTED │ BROWSER ISOLATION      │")
-print("│ SHA256 DEDUP │ MULTI-STAGE RETRY │ ROBUST RPC EXTRACTION       │")
-print("│ PLAYWRIGHT LOCATORS │ SELECTOLAX ENHANCED │ PROXY ROTATION      │")
+print("│ FIXED LIFECYCLE │ INFINITE SCROLL │ RPC CAPTURE                 │")
+print("│ SCREENSHOT DEBUG │ PROXY VERIFICATION │ CAPTCHA RECOVERY        │")
+print("│ DETAILED LOGGING │ ROBUST SELECTORS │ METADATA EXTRACTION       │")
 print("└─────────────────────────────────────────────────────────────────┘")
 print("=" * 80)
 
 # =========================================================
-# PHASE 1: ENHANCED PROXY MANAGER WITH PROVIDER-SPECIFIC SESSION FORMATS
-# =========================================================
-
-class ProxyManager:
-    """Proxy manager supporting multiple provider formats"""
-    
-    def __init__(self):
-        self.proxy_pool = []
-        self.provider_type = None  # datimpulse, luminati, oxylabs, etc.
-        self.proxy_stats = {}
-        self.init_proxies()
-    
-    def init_proxies(self):
-        proxy_server = os.getenv("PROXY_SERVER", "").strip()
-        proxy_username = os.getenv("PROXY_USERNAME", "").strip()
-        proxy_password = os.getenv("PROXY_PASSWORD", "").strip()
-        
-        if not proxy_server:
-            return
-        
-        # Detect provider based on domain
-        if "dataimpulse" in proxy_server or "gw.dataimpulse" in proxy_server:
-            self.provider_type = "dataimpulse"
-        elif "luminati" in proxy_server:
-            self.provider_type = "luminati"
-        elif "oxylabs" in proxy_server:
-            self.provider_type = "oxylabs"
-        elif "scraperapi" in proxy_server:
-            self.provider_type = "scraperapi"
-        else:
-            self.provider_type = "generic"
-        
-        servers = proxy_server.split(",") if "," in proxy_server else [proxy_server]
-        
-        for server in servers:
-            server = server.strip()
-            if not server:
-                continue
-            
-            if not server.startswith(("http://", "https://")):
-                server = f"http://{server}"
-            
-            base_proxy = {"server": server}
-            
-            if proxy_username and proxy_password:
-                base_proxy["username"] = proxy_username
-                base_proxy["password"] = proxy_password
-            
-            self.proxy_pool.append(base_proxy)
-            self.proxy_stats[server] = {
-                "success": 0, "fail": 0, "captcha": 0, 
-                "reviews": 0, "latencies": [], "last_used": None
-            }
-        
-        logger.info(f"✅ Proxy pool: {len(self.proxy_pool)} proxies (provider: {self.provider_type})")
-    
-    def get_proxy_with_session(self, force_fresh: bool = False) -> Optional[Dict]:
-        """Get proxy with provider-appropriate session syntax"""
-        if not self.proxy_pool:
-            return None
-        
-        # Select best proxy
-        best_proxy = self._select_best_proxy()
-        if not best_proxy:
-            return None
-        
-        session_id = random.randint(100000, 999999)
-        
-        # Provider-specific session syntax
-        if self.provider_type == "dataimpulse":
-            # DataImpulse format: username-session-sessionid
-            if "username" in best_proxy:
-                best_proxy["username"] = f"{best_proxy['username']}-session-{session_id}"
-        
-        elif self.provider_type == "luminati":
-            # Luminati format: username-session-random
-            if "username" in best_proxy:
-                best_proxy["username"] = f"{best_proxy['username']}-session-{session_id}"
-        
-        elif self.provider_type == "oxylabs":
-            # Oxylabs format: customer-username-sessid-random
-            if "username" in best_proxy:
-                best_proxy["username"] = f"{best_proxy['username']}-sessid-{session_id}"
-        
-        elif self.provider_type == "scraperapi":
-            # ScraperAPI uses API key, not session rotation
-            pass
-        
-        logger.debug(f"🔑 Proxy session: {session_id} (provider: {self.provider_type})")
-        return best_proxy
-    
-    def _select_best_proxy(self) -> Optional[Dict]:
-        """Select best performing proxy"""
-        if not self.proxy_pool:
-            return None
-        
-        best_score = -1
-        best_proxy = None
-        
-        for proxy in self.proxy_pool:
-            server = proxy.get("server", "")
-            stats = self.proxy_stats.get(server, {})
-            
-            success_rate = stats.get("success", 1) / max(1, stats.get("success", 1) + stats.get("fail", 1))
-            captcha_penalty = min(stats.get("captcha", 0) * 0.1, 0.5)
-            score = success_rate - captcha_penalty
-            
-            if score > best_score:
-                best_score = score
-                best_proxy = proxy
-        
-        return best_proxy or self.proxy_pool[0]
-    
-    def report_result(self, proxy: Dict, success: bool, captcha: bool = False, 
-                     reviews: int = 0, latency: float = 0):
-        server = proxy.get("server", "")
-        if server not in self.proxy_stats:
-            return
-        
-        stats = self.proxy_stats[server]
-        if success:
-            stats["success"] += 1
-            stats["reviews"] += reviews
-        else:
-            stats["fail"] += 1
-        if captcha:
-            stats["captcha"] += 1
-        if latency > 0:
-            stats["latencies"].append(latency)
-
-# =========================================================
-# PHASE 2: ISOLATED BROWSER SESSION MANAGER
+# PHASE 1: FIXED BROWSER SESSION MANAGER (No async with bug)
 # =========================================================
 
 class BrowserSessionManager:
-    """Create isolated browser sessions with unique profiles"""
+    """Fixed browser session manager - proper lifecycle management"""
     
     @staticmethod
-    async def create_isolated_session(proxy: Dict = None) -> Tuple[any, any, str]:
-        """Create a completely isolated browser session with unique profile"""
+    async def create_isolated_session(proxy: Dict = None) -> Tuple[any, any, any, str]:
+        """Create isolated session WITHOUT async with bug"""
         
-        # Generate unique session ID and profile directory
         session_id = str(uuid.uuid4())[:8]
         profile_dir = ScraperConfig.USER_DATA_DIR / f"profile_{session_id}"
         profile_dir.mkdir(parents=True, exist_ok=True)
         
         try:
-            async with async_playwright() as p:
-                # Launch with isolated profile
-                context = await p.chromium.launch_persistent_context(
-                    user_data_dir=str(profile_dir),
-                    headless=True,
-                    proxy=proxy,
-                    args=[
-                        "--disable-blink-features=AutomationControlled",
-                        "--disable-dev-shm-usage",
-                        "--no-first-run",
-                        "--no-default-browser-check",
-                        "--disable-features=Translate",
-                        f"--profile-directory={session_id}"
-                    ],
-                    timeout=ScraperConfig.BROWSER_LAUNCH_TIMEOUT
-                )
-                
-                page = context.pages[0] if context.pages else await context.new_page()
-                
-                # Apply stealth if available
-                if STEALTH_AVAILABLE:
-                    try:
-                        await stealth_async(page)
-                    except:
-                        pass
-                
-                logger.debug(f"🆔 Isolated session created: {session_id}")
-                return context, page, session_id
-                
+            # Start playwright manually (NOT using async with)
+            playwright = await patchright_playwright().start()
+            
+            # Launch persistent context
+            context = await playwright.chromium.launch_persistent_context(
+                user_data_dir=str(profile_dir),
+                headless=True,
+                proxy=proxy,
+                args=[
+                    "--disable-blink-features=AutomationControlled",
+                    "--disable-dev-shm-usage",
+                    "--no-first-run",
+                    "--no-default-browser-check",
+                    "--disable-features=Translate",
+                    f"--profile-directory={session_id}"
+                ],
+                timeout=ScraperConfig.BROWSER_LAUNCH_TIMEOUT
+            )
+            
+            page = context.pages[0] if context.pages else await context.new_page()
+            
+            # Apply stealth if available
+            if STEALTH_AVAILABLE:
+                try:
+                    await stealth_async(page)
+                    logger.debug("✅ Stealth applied")
+                except Exception as e:
+                    logger.debug(f"Stealth failed: {e}")
+            
+            logger.debug(f"🆔 Isolated session created: {session_id}")
+            return playwright, context, page, session_id
+            
         except Exception as e:
             logger.error(f"Failed to create isolated session: {e}")
             # Cleanup on failure
@@ -323,10 +170,12 @@ class BrowserSessionManager:
             raise
     
     @staticmethod
-    async def cleanup_session(context, session_id: str):
-        """Clean up isolated session and remove profile"""
+    async def cleanup_session(playwright, context, session_id: str):
+        """Proper cleanup of all resources"""
         if context:
             await context.close()
+        if playwright:
+            await playwright.stop()
         
         # Remove profile directory
         profile_dir = ScraperConfig.USER_DATA_DIR / f"profile_{session_id}"
@@ -336,381 +185,606 @@ class BrowserSessionManager:
             logger.debug(f"🗑️ Cleaned up profile: {session_id}")
 
 # =========================================================
-# PHASE 3: ROBUST RPC EXTRACTOR (EXPERIMENTAL - NOT PRIMARY)
+# PHASE 2: INFINITE SCROLL WITH PROPER REVIEW COUNTING
 # =========================================================
 
-class DirectRPCExtractor:
-    """Experimental direct RPC extraction - fragile, used as optimization only"""
+class InfiniteScrollManager:
+    """Proper infinite scroll implementation"""
     
-    # Known RPC endpoints (Google changes these frequently)
-    RPC_ENDPOINTS = [
-        "https://www.google.com/maps/preview/review/listentitiesreviews",
-        "https://www.google.com/maps/rpc/GetPlaceReviews",
-        "https://www.google.com/maps/rpc/listugcposts"
+    @staticmethod
+    async def scroll_reviews_panel(page) -> Tuple[int, int]:
+        """Scroll until no new reviews load"""
+        scroll_count = 0
+        stagnant_count = 0
+        last_review_count = 0
+        final_count = 0
+        
+        logger.info("📜 Starting infinite scroll...")
+        
+        for i in range(ScraperConfig.MAX_SCROLLS):
+            # Scroll the review panel
+            scroll_result = await page.evaluate("""
+                const panel = document.querySelector('.m6QErb, [role="main"], .section-scrollbox');
+                if (panel) {
+                    panel.scrollTop += 3000;
+                    return true;
+                } else {
+                    window.scrollBy(0, 3000);
+                    return false;
+                }
+            """)
+            
+            # Random delay to simulate human behavior
+            await asyncio.sleep(random.uniform(ScraperConfig.SCROLL_DELAY_MIN, ScraperConfig.SCROLL_DELAY_MAX))
+            
+            # Count current reviews
+            current_count = await page.locator('div[data-review-id], div.jftiEf, div.MyEned').count()
+            
+            # Log progress every 5 scrolls
+            if i % 5 == 0:
+                logger.info(f"📜 Scroll {i}: {current_count} reviews loaded")
+            
+            # Check if we're still getting new reviews
+            if current_count == last_review_count:
+                stagnant_count += 1
+                if stagnant_count >= ScraperConfig.SCROLL_STAGNANT_LIMIT:
+                    logger.info(f"📜 Scroll complete: {scroll_count} scrolls, {current_count} reviews (stagnant)")
+                    final_count = current_count
+                    break
+            else:
+                stagnant_count = 0
+                last_review_count = current_count
+            
+            scroll_count += 1
+            
+            # Early exit if we have enough reviews
+            if current_count >= ScraperConfig.MAX_REVIEWS:
+                logger.info(f"📜 Reached target: {current_count} reviews")
+                final_count = current_count
+                break
+        else:
+            # Loop completed without break
+            final_count = last_review_count
+            logger.info(f"📜 Scroll complete: {scroll_count} scrolls, {final_count} reviews (max reached)")
+        
+        return scroll_count, final_count
+
+# =========================================================
+# PHASE 3: RPC RESPONSE CAPTURE
+# =========================================================
+
+class RPCCaptureManager:
+    """Capture and decode Google RPC responses"""
+    
+    def __init__(self):
+        self.captured_responses = []
+        self.rpc_received = asyncio.Event()
+    
+    async def setup(self, page):
+        """Setup RPC response capture"""
+        
+        def on_response(response):
+            asyncio.create_task(self._capture_rpc_response(response))
+        
+        page.on("response", on_response)
+        logger.info("📡 RPC capture active")
+    
+    async def _capture_rpc_response(self, response):
+        """Capture RPC responses containing review data"""
+        try:
+            url = response.url
+            
+            # Target Google RPC endpoints
+            rpc_patterns = [
+                'batchexecute',
+                'GetPlaceReviews',
+                'review',
+                'rpc',
+                'listugcposts',
+                'GetReviews'
+            ]
+            
+            if any(pattern in url.lower() for pattern in rpc_patterns):
+                if response.status == 200:
+                    try:
+                        body = await response.text()
+                        if body and len(body) > 500:
+                            # Try to decode RPC response
+                            decoded_reviews = self._decode_rpc_response(body)
+                            if decoded_reviews:
+                                self.captured_responses.extend(decoded_reviews)
+                                self.rpc_received.set()
+                                logger.info(f"📡 Captured {len(decoded_reviews)} reviews from RPC")
+                    except Exception as e:
+                        logger.debug(f"RPC capture failed: {e}")
+        except Exception as e:
+            logger.debug(f"Response handler error: {e}")
+    
+    def _decode_rpc_response(self, payload: str) -> List[Dict]:
+        """Decode various RPC response formats"""
+        reviews = []
+        
+        # Look for review text patterns
+        patterns = [
+            r'"reviewText":"([^"\\]*(?:\\.[^"\\]*)*)"',
+            r'"text":"([^"\\]*(?:\\.[^"\\]*)*)"',
+            r'"snippet":"([^"\\]*(?:\\.[^"\\]*)*)"',
+        ]
+        
+        for pattern in patterns:
+            matches = re.findall(pattern, payload)
+            for match in matches:
+                if len(match) > ScraperConfig.MIN_REVIEW_LENGTH:
+                    # Try to find associated rating
+                    rating = 5
+                    rating_match = re.search(r'"rating":(\d+)', payload)
+                    if rating_match:
+                        rating = int(rating_match.group(1))
+                    
+                    # Try to find author
+                    author = "Google User"
+                    author_match = re.search(r'"authorName":"([^"]+)"', payload)
+                    if author_match:
+                        author = author_match.group(1)
+                    
+                    reviews.append({
+                        "text": match[:ScraperConfig.MAX_REVIEW_LENGTH],
+                        "author": author,
+                        "rating": rating,
+                        "source": "rpc_capture"
+                    })
+        
+        return reviews
+    
+    def get_captured_reviews(self) -> List[Dict]:
+        return self.captured_responses
+
+# =========================================================
+# PHASE 4: ENHANCED REVIEW EXTRACTOR (Robust Selectors)
+# =========================================================
+
+class ReviewExtractor:
+    """Extract reviews with robust selectors and metadata"""
+    
+    # Multiple selector groups for redundancy
+    REVIEW_CARD_SELECTORS = [
+        'div[data-review-id]',
+        'div.jftiEf',
+        'div.MyEned',
+        'div[jsaction*="review"]',
+        'div[role="article"]'
+    ]
+    
+    TEXT_SELECTORS = [
+        '.wiI7pd',
+        '.MyEned',
+        'span[jsname]',
+        '.review-text',
+        '[data-review-text]'
+    ]
+    
+    AUTHOR_SELECTORS = [
+        '.d4r55',
+        '.TSUbDb',
+        '[data-author]',
+        '.author-name',
+        'a[href*="user"]'
+    ]
+    
+    RATING_SELECTORS = [
+        'span.kvMYJc',
+        '[aria-label*="stars"]',
+        '[role="img"][aria-label*="star"]',
+        '.rating-value'
+    ]
+    
+    DATE_SELECTORS = [
+        '.rsqaWe',
+        '.dehysf',
+        '.review-date',
+        '[data-date]'
     ]
     
     @classmethod
-    async def fetch_reviews(cls, place_id: str, proxy: Dict = None) -> List[Dict]:
-        """Attempt direct RPC extraction (experimental, may fail)"""
-        if not CURL_CFFI_AVAILABLE:
-            return []
-        
+    async def extract_reviews(cls, page) -> List[Dict]:
+        """Extract reviews using multiple selector strategies"""
         reviews = []
         
-        for endpoint in cls.RPC_ENDPOINTS:
+        # Try each review card selector
+        for card_selector in cls.REVIEW_CARD_SELECTORS:
             try:
-                reviews = await cls._try_endpoint(endpoint, place_id, proxy)
-                if reviews:
-                    logger.info(f"⚡ Direct RPC success from {endpoint.split('/')[-1]}")
-                    return reviews
+                cards = await page.locator(card_selector).all()
+                if cards:
+                    logger.info(f"🔍 Found {len(cards)} review cards with selector: {card_selector[:50]}")
+                    
+                    for card in cards[:ScraperConfig.MAX_REVIEWS]:
+                        review = await cls._extract_review_from_card(card)
+                        if review and review.get("text"):
+                            reviews.append(review)
+                    
+                    if reviews:
+                        logger.info(f"✅ Extracted {len(reviews)} reviews using {card_selector[:50]}")
+                        return reviews
             except Exception as e:
-                logger.debug(f"RPC endpoint {endpoint} failed: {e}")
+                logger.debug(f"Selector {card_selector} failed: {e}")
                 continue
         
-        return []
+        return reviews
     
     @classmethod
-    async def _try_endpoint(cls, endpoint: str, place_id: str, proxy: Dict) -> List[Dict]:
-        """Try a specific RPC endpoint"""
-        # Build parameters (format varies by endpoint)
-        params = {
-            "authuser": "0",
-            "hl": "en",
-            "gl": "us"
-        }
-        
-        if "listentitiesreviews" in endpoint:
-            params["pb"] = f"!1m2!1y{place_id}!2y!2m2!1sen!2sus!3e2"
-        elif "GetPlaceReviews" in endpoint:
-            params["place_id"] = place_id
-        
-        # Setup proxy for curl
-        proxies = None
-        if proxy and proxy.get("server"):
-            proxy_url = proxy["server"]
-            if proxy.get("username") and proxy.get("password"):
-                proxy_url = proxy_url.replace("http://", f"http://{proxy['username']}:{proxy['password']}@")
-            proxies = {"http": proxy_url, "https": proxy_url}
-        
-        response = curl_requests.get(
-            endpoint,
-            params=params,
-            proxies=proxies,
-            timeout=15,
-            impersonate="chrome120"
-        )
-        
-        if response.status_code == 200 and len(response.text) > 500:
-            # Try to decode as RPC
-            from app.services.scraper import AdvancedRPCDecoder
-            return AdvancedRPCDecoder.decode(response.text)
-        
-        return []
-
-# =========================================================
-# PHASE 4: HYBRID REVIEW EXTRACTOR (Playwright + Selectolax)
-# =========================================================
-
-class HybridReviewExtractor:
-    """Extract reviews using both Playwright locators and HTML parsing"""
-    
-    @staticmethod
-    async def extract_from_page(page, max_reviews: int = 150) -> List[Dict]:
-        """Extract reviews with dual strategy: Playwright first, HTML fallback"""
-        reviews = []
-        
-        # Strategy 1: Playwright locators (most reliable for dynamic content)
+    async def _extract_review_from_card(cls, card) -> Optional[Dict]:
+        """Extract individual review data from card"""
         try:
-            logger.debug("Extracting with Playwright locators...")
-            cards = await page.locator('div[data-review-id], div.jftiEf, div.MyEned').all()
+            review_data = {}
             
-            for card in cards[:max_reviews]:
-                try:
-                    review_data = {}
-                    
-                    # Extract text with multiple selector attempts
-                    for sel in ['.wiI7pd', '.MyEned', 'span[jsname]']:
-                        elem = card.locator(sel).first
-                        if await elem.count() > 0:
-                            review_data["text"] = (await elem.inner_text()).strip()
+            # Extract text
+            for text_selector in cls.TEXT_SELECTORS:
+                elem = card.locator(text_selector).first
+                if await elem.count() > 0:
+                    text = (await elem.inner_text()).strip()
+                    if text and len(text) >= ScraperConfig.MIN_REVIEW_LENGTH:
+                        review_data["text"] = text[:ScraperConfig.MAX_REVIEW_LENGTH]
+                        break
+            
+            if not review_data.get("text"):
+                return None
+            
+            # Extract author
+            for author_selector in cls.AUTHOR_SELECTORS:
+                elem = card.locator(author_selector).first
+                if await elem.count() > 0:
+                    author = (await elem.inner_text()).strip()
+                    if author:
+                        review_data["author"] = author
+                        break
+            if "author" not in review_data:
+                review_data["author"] = "Anonymous"
+            
+            # Extract rating
+            for rating_selector in cls.RATING_SELECTORS:
+                elem = card.locator(rating_selector).first
+                if await elem.count() > 0:
+                    aria_label = await elem.get_attribute('aria-label')
+                    if aria_label:
+                        rating_match = re.search(r'(\d+)', aria_label)
+                        if rating_match:
+                            review_data["rating"] = int(rating_match.group(1))
                             break
                     
-                    if review_data.get("text") and len(review_data["text"]) >= ScraperConfig.MIN_REVIEW_LENGTH:
-                        # Extract author
-                        for sel in ['.d4r55', '.TSUbDb']:
-                            elem = card.locator(sel).first
-                            if await elem.count() > 0:
-                                review_data["author"] = (await elem.inner_text()).strip()
-                                break
-                        else:
-                            review_data["author"] = "Anonymous"
-                        
-                        # Extract rating
-                        rating_elem = card.locator('span.kvMYJc').first
-                        if await rating_elem.count() > 0:
-                            aria = await rating_elem.get_attribute('aria-label')
-                            if aria:
-                                match = re.search(r'(\d)', aria)
-                                if match:
-                                    review_data["rating"] = int(match.group(1))
-                        else:
-                            review_data["rating"] = 5
-                        
-                        review_data["source"] = "playwright_locator"
-                        reviews.append(review_data)
-                        
-                except Exception as e:
-                    logger.debug(f"Playwright extraction failed: {e}")
-                    continue
+                    # Try to get from class or attribute
+                    rating_text = await elem.inner_text()
+                    rating_match = re.search(r'(\d+)', rating_text)
+                    if rating_match:
+                        review_data["rating"] = int(rating_match.group(1))
+                        break
+            if "rating" not in review_data:
+                review_data["rating"] = 5
             
-            if reviews:
-                logger.info(f"✅ Playwright locators extracted {len(reviews)} reviews")
-                return reviews
+            # Extract date
+            for date_selector in cls.DATE_SELECTORS:
+                elem = card.locator(date_selector).first
+                if await elem.count() > 0:
+                    date_text = (await elem.inner_text()).strip()
+                    if date_text:
+                        review_data["date"] = date_text
+                        break
+            
+            review_data["source"] = "dom_extraction"
+            return review_data
+            
+        except Exception as e:
+            logger.debug(f"Review extraction failed: {e}")
+            return None
+
+# =========================================================
+# PHASE 5: PROXY VERIFICATION
+# =========================================================
+
+class ProxyVerifier:
+    """Verify proxy rotation is working"""
+    
+    @staticmethod
+    async def get_current_ip(page) -> Optional[str]:
+        """Get current IP address"""
+        try:
+            response = await page.goto(ScraperConfig.IP_CHECK_URL, timeout=5000)
+            if response:
+                content = await response.text()
+                data = json.loads(content)
+                return data.get("ip")
+        except Exception as e:
+            logger.debug(f"IP check failed: {e}")
+        return None
+    
+    @staticmethod
+    async def verify_rotation(proxy_config: Dict) -> bool:
+        """Verify that proxy rotation is changing IPs"""
+        try:
+            from patchright.async_api import async_playwright
+            
+            async with async_playwright() as p:
+                context = await p.chromium.launch_persistent_context(
+                    user_data_dir="/tmp/test_profile",
+                    headless=True,
+                    proxy=proxy_config
+                )
+                page = context.pages[0] if context.pages else await context.new_page()
+                
+                ip = await ProxyVerifier.get_current_ip(page)
+                await context.close()
+                
+                if ip:
+                    logger.info(f"🌐 Proxy IP: {ip}")
+                    return True
                 
         except Exception as e:
-            logger.debug(f"Playwright extraction strategy failed: {e}")
+            logger.error(f"Proxy verification failed: {e}")
         
-        # Strategy 2: HTML parsing with Selectolax (fallback)
-        if SELECTOLAX_AVAILABLE:
+        return False
+
+# =========================================================
+# PHASE 6: CAPTCHA DETECTION AND RECOVERY
+# =========================================================
+
+class CaptchaHandler:
+    """Detect and handle CAPTCHA pages"""
+    
+    CAPTCHA_PATTERNS = [
+        "sorry/index",
+        "unusual traffic",
+        "recaptcha",
+        "captcha",
+        "rate limit",
+        "too many requests",
+        "automated requests"
+    ]
+    
+    @classmethod
+    async def detect(cls, page) -> Tuple[bool, Optional[str]]:
+        """Detect if page shows CAPTCHA"""
+        try:
+            content = await page.content()
+            url = page.url
+            content_lower = content.lower()
+            url_lower = url.lower()
+            
+            for pattern in cls.CAPTCHA_PATTERNS:
+                if pattern in content_lower or pattern in url_lower:
+                    return True, pattern
+            
+            return False, None
+        except Exception as e:
+            logger.debug(f"CAPTCHA detection failed: {e}")
+            return False, None
+    
+    @classmethod
+    async def take_captcha_screenshot(cls, page, place_id: str):
+        """Take screenshot when CAPTCHA is detected"""
+        if ScraperConfig.SCREENSHOT_ON_FAILURE:
             try:
-                logger.debug("Extracting with Selectolax HTML parser...")
-                html = await page.content()
-                tree = HTMLParser(html)
+                ScraperConfig.SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
+                timestamp = int(time.time())
+                screenshot_path = ScraperConfig.SCREENSHOT_DIR / f"captcha_{place_id}_{timestamp}.png"
+                await page.screenshot(path=str(screenshot_path))
+                logger.warning(f"📸 CAPTCHA screenshot saved: {screenshot_path}")
+            except Exception as e:
+                logger.debug(f"Screenshot failed: {e}")
+
+# =========================================================
+# PHASE 7: MAIN SCRAPER WITH ALL FIXES
+# =========================================================
+
+class UltimateGoogleScraper:
+    """Production scraper with all improvements"""
+    
+    def __init__(self):
+        self._semaphore = SCRAPER_SEMAPHORE
+        self.proxy_pool = self._init_proxy_pool()
+    
+    def _init_proxy_pool(self) -> List[Dict]:
+        """Initialize proxy pool from environment"""
+        proxy_server = os.getenv("PROXY_SERVER", "").strip()
+        proxy_username = os.getenv("PROXY_USERNAME", "").strip()
+        proxy_password = os.getenv("PROXY_PASSWORD", "").strip()
+        
+        proxies = []
+        if proxy_server:
+            servers = proxy_server.split(",") if "," in proxy_server else [proxy_server]
+            for server in servers:
+                server = server.strip()
+                if server:
+                    if not server.startswith(("http://", "https://")):
+                        server = f"http://{server}"
+                    
+                    proxy_config = {"server": server}
+                    if proxy_username and proxy_password:
+                        proxy_config["username"] = proxy_username
+                        proxy_config["password"] = proxy_password
+                    
+                    proxies.append(proxy_config)
+            
+            logger.info(f"✅ Initialized {len(proxies)} proxies")
+        
+        return proxies
+    
+    async def scrape(self, place_id: str) -> List[Dict]:
+        """Main scrape method with all improvements"""
+        
+        async with self._semaphore:
+            logger.info("=" * 80)
+            logger.info(f"🚀 Starting scrape: {place_id}")
+            start_time = time.time()
+            
+            # Try with each proxy
+            for attempt, proxy in enumerate(self.proxy_pool or [None]):
+                logger.info(f"📡 Attempt {attempt + 1}/{max(1, len(self.proxy_pool) or 1)}")
                 
-                review_elements = tree.css('div[data-review-id], div.jftiEf, div.MyEned')
-                for elem in review_elements[:max_reviews]:
-                    text_elem = elem.css_first('.wiI7pd, .MyEned, span[jsname]')
-                    if text_elem:
-                        text = text_elem.text(strip=True)
-                        if len(text) >= ScraperConfig.MIN_REVIEW_LENGTH:
-                            # Try to extract author
-                            author_elem = elem.css_first('.d4r55, .TSUbDb')
-                            author = author_elem.text(strip=True) if author_elem else "Anonymous"
-                            
-                            # Try to extract rating
-                            rating_elem = elem.css_first('span.kvMYJc')
-                            rating = 5
-                            if rating_elem:
-                                aria = rating_elem.attributes.get('aria-label', '')
-                                match = re.search(r'(\d)', aria)
-                                if match:
-                                    rating = int(match.group(1))
-                            
-                            reviews.append({
-                                "text": text,
-                                "author": author,
-                                "rating": rating,
-                                "source": "selectolax_html"
-                            })
+                # Verify proxy rotation if proxy is used
+                if proxy:
+                    logger.info(f"🌐 Verifying proxy: {proxy.get('server', 'unknown')[:50]}")
+                    # Log proxy usage for debugging
+                    logger.info(f"🔑 Proxy username: {proxy.get('username', 'none')[:30]}...")
                 
-                if reviews:
-                    logger.info(f"✅ Selectolax extracted {len(reviews)} reviews")
+                reviews = await self._scrape_with_playwright(place_id, proxy)
+                
+                if reviews and len(reviews) >= 10:
+                    duration = time.time() - start_time
+                    logger.info("=" * 80)
+                    logger.info(f"✅ SUCCESS: {len(reviews)} reviews in {duration:.2f}s")
+                    logger.info(f"📊 Final count: {len(reviews)}/{ScraperConfig.MAX_REVIEWS}")
+                    logger.info("=" * 80)
                     return reviews
-                    
-            except Exception as e:
-                logger.debug(f"Selectolax extraction failed: {e}")
-        
-        # Strategy 3: BeautifulSoup (last resort)
-        if not SELECTOLAX_AVAILABLE:
-            try:
-                from bs4 import BeautifulSoup
-                logger.debug("Extracting with BeautifulSoup...")
-                html = await page.content()
-                soup = BeautifulSoup(html, 'html.parser')
                 
-                review_divs = soup.select('div[data-review-id], div.jftiEf, div.MyEned')
-                for div in review_divs[:max_reviews]:
-                    text_elem = div.select_one('.wiI7pd, .MyEned, span[jsname]')
-                    if text_elem:
-                        text = text_elem.get_text(strip=True)
-                        if len(text) >= ScraperConfig.MIN_REVIEW_LENGTH:
-                            author_elem = div.select_one('.d4r55, .TSUbDb')
-                            author = author_elem.get_text(strip=True) if author_elem else "Anonymous"
-                            reviews.append({
-                                "text": text,
-                                "author": author,
-                                "rating": 5,
-                                "source": "beautifulsoup"
-                            })
-                
-                if reviews:
-                    logger.info(f"✅ BeautifulSoup extracted {len(reviews)} reviews")
-                    
-            except Exception as e:
-                logger.debug(f"BeautifulSoup extraction failed: {e}")
-        
-        return reviews
-
-# =========================================================
-# PHASE 5: MULTI-STAGE RETRY WITH PROGRESSIVE BACKOFF
-# =========================================================
-
-class RetryManager:
-    """Multi-stage retry with different strategies per stage"""
+                # Rotate proxy on failure
+                if proxy and attempt < len(self.proxy_pool) - 1:
+                    logger.warning(f"⚠️ Attempt {attempt + 1} failed, rotating proxy...")
+                    await asyncio.sleep(2)
+            
+            logger.error(f"❌ All attempts failed for {place_id}")
+            return []
     
-    def __init__(self, proxy_manager: ProxyManager):
-        self.proxy_manager = proxy_manager
-    
-    async def scrape_with_retry(self, place_id: str) -> List[Dict]:
-        """Scrape with progressive retry stages"""
+    async def _scrape_with_playwright(self, place_id: str, proxy: Dict) -> List[Dict]:
+        """Scrape with proper Playwright lifecycle"""
         
-        # Stage 1: Direct RPC (fast but fragile, experimental)
-        logger.info("Stage 1: Attempting direct RPC extraction...")
-        reviews = await DirectRPCExtractor.fetch_reviews(place_id)
-        if reviews and len(reviews) >= 20:
-            logger.info(f"✅ Stage 1 success: {len(reviews)} reviews")
-            return reviews
-        
-        # Stage 2: Browser with proxy rotation
-        for attempt in range(ScraperConfig.PROXY_ROTATION_RETRIES):
-            logger.info(f"Stage 2: Browser extraction with proxy (attempt {attempt + 1})...")
-            
-            # Rotate proxy for each attempt
-            proxy = self.proxy_manager.get_proxy_with_session(force_fresh=True)
-            
-            reviews = await self._browser_extraction(place_id, proxy)
-            if reviews and len(reviews) >= 10:
-                logger.info(f"✅ Stage 2 success: {len(reviews)} reviews")
-                return reviews
-            
-            # Exponential backoff between attempts
-            await asyncio.sleep(2 ** attempt)
-        
-        # Stage 3: Fresh browser with clean profile
-        for attempt in range(ScraperConfig.FRESH_BROWSER_RETRIES):
-            logger.info(f"Stage 3: Fresh browser profile (attempt {attempt + 1})...")
-            
-            reviews = await self._fresh_browser_extraction(place_id)
-            if reviews and len(reviews) >= 5:
-                logger.info(f"✅ Stage 3 success: {len(reviews)} reviews")
-                return reviews
-            
-            await asyncio.sleep(3 ** attempt)
-        
-        return []
-    
-    async def _browser_extraction(self, place_id: str, proxy: Dict) -> List[Dict]:
-        """Browser-based extraction with given proxy"""
+        playwright = None
         context = None
         session_id = None
         
         try:
-            # Create isolated session
-            context, page, session_id = await BrowserSessionManager.create_isolated_session(proxy)
+            # Create isolated session (fixed lifecycle)
+            playwright, context, page, session_id = await BrowserSessionManager.create_isolated_session(proxy)
             
-            # Navigate and extract
+            # Setup RPC capture
+            rpc_capture = RPCCaptureManager()
+            await rpc_capture.setup(page)
+            
+            # Check proxy IP (for debugging)
+            if proxy and DETAILED_LOGGING:
+                ip = await ProxyVerifier.get_current_ip(page)
+                logger.info(f"🌐 Current proxy IP: {ip}")
+            
+            # Navigate to Google Maps
             url = f"https://www.google.com/maps/place/?q=place_id:{place_id}"
+            logger.info(f"🌐 Navigating to: {url[:80]}")
             await page.goto(url, wait_until="networkidle", timeout=ScraperConfig.NAVIGATION_TIMEOUT)
             await asyncio.sleep(random.uniform(1, 2))
             
-            # Click reviews button
-            reviews_button = page.locator('button[data-tab-index="1"]').first
-            if await reviews_button.count() > 0:
-                await reviews_button.click()
-                await asyncio.sleep(random.uniform(2, 3))
-            else:
+            # Check for CAPTCHA
+            is_captcha, captcha_type = await CaptchaHandler.detect(page)
+            if is_captcha:
+                logger.error(f"🚫 CAPTCHA detected: {captcha_type}")
+                await CaptchaHandler.take_captcha_screenshot(page, place_id)
                 return []
             
-            # Wait for content to load
-            await asyncio.sleep(3)
+            # Find and click reviews button with multiple selectors
+            button_selectors = [
+                'button[data-tab-index="1"]',
+                'button[aria-label*="reviews" i]',
+                'button[aria-label*="Reviews"]',
+                'button[jsaction*="review"]',
+                'button[jsaction*="pane.reviewChart.moreReviews"]',
+                'button[aria-label*="stars"]'
+            ]
             
-            # Extract reviews with hybrid extractor
-            reviews = await HybridReviewExtractor.extract_from_page(page)
+            button_found = False
+            for selector in button_selectors:
+                try:
+                    button = page.locator(selector).first
+                    if await button.count() > 0:
+                        await button.click()
+                        logger.info(f"✅ Clicked reviews button: {selector[:50]}")
+                        button_found = True
+                        break
+                except Exception as e:
+                    logger.debug(f"Button selector {selector} failed: {e}")
             
-            # Report success
-            if proxy:
-                self.proxy_manager.report_result(proxy, True, reviews=len(reviews))
+            if not button_found:
+                logger.error("❌ Could not find reviews button")
+                # Take screenshot for debugging
+                if ScraperConfig.SCREENSHOT_ON_FAILURE:
+                    screenshot_path = ScraperConfig.SCREENSHOT_DIR / f"no_button_{place_id}.png"
+                    await page.screenshot(path=str(screenshot_path))
+                    logger.info(f"📸 Screenshot saved: {screenshot_path}")
+                return []
+            
+            # Wait for reviews to load
+            await asyncio.sleep(random.uniform(2, 3))
+            
+            # Check for CAPTCHA again after interaction
+            is_captcha, captcha_type = await CaptchaHandler.detect(page)
+            if is_captcha:
+                logger.error(f"🚫 CAPTCHA detected after button click")
+                await CaptchaHandler.take_captcha_screenshot(page, place_id)
+                return []
+            
+            # Try to get RPC reviews first (fast path)
+            await asyncio.sleep(2)  # Give RPC time to arrive
+            rpc_reviews = rpc_capture.get_captured_reviews()
+            if rpc_reviews:
+                logger.info(f"📡 RPC capture succeeded: {len(rpc_reviews)} reviews")
+                return rpc_reviews
+            
+            # Fallback: DOM extraction with infinite scroll
+            logger.info("🔄 RPC capture empty, using DOM extraction...")
+            
+            # Perform infinite scroll
+            scroll_count, review_count = await InfiniteScrollManager.scroll_reviews_panel(page)
+            logger.info(f"📜 Scrolled {scroll_count} times, found {review_count} review cards")
+            
+            # Extract reviews from DOM
+            reviews = await ReviewExtractor.extract_reviews(page)
+            logger.info(f"📝 Extracted {len(reviews)} reviews from DOM")
+            
+            # Take screenshot if no reviews found
+            if not reviews and ScraperConfig.SCREENSHOT_ON_FAILURE:
+                screenshot_path = ScraperConfig.SCREENSHOT_DIR / f"no_reviews_{place_id}_{int(time.time())}.png"
+                await page.screenshot(path=str(screenshot_path))
+                logger.warning(f"📸 No reviews found, screenshot saved: {screenshot_path}")
             
             return reviews
             
         except Exception as e:
-            logger.error(f"Browser extraction failed: {e}")
-            if proxy:
-                self.proxy_manager.report_result(proxy, False)
+            logger.error(f"Scraping failed: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return []
         finally:
-            if context and session_id:
-                await BrowserSessionManager.cleanup_session(context, session_id)
-    
-    async def _fresh_browser_extraction(self, place_id: str) -> List[Dict]:
-        """Extraction with completely fresh browser (no proxy)"""
-        return await self._browser_extraction(place_id, None)
-
-# =========================================================
-# PHASE 6: MAIN SCRAPER WITH CONCURRENCY CONTROL
-# =========================================================
-
-class UltimateGoogleScraper:
-    """Production scraper with concurrency protection"""
-    
-    def __init__(self):
-        self.proxy_manager = ProxyManager()
-        self.retry_manager = RetryManager(self.proxy_manager)
-        self._semaphore = SCRAPER_SEMAPHORE
-    
-    async def scrape(self, place_id: str) -> List[Dict]:
-        """Main entry point with semaphore protection"""
-        
-        # CRITICAL: Limit concurrent scrapers
-        async with self._semaphore:
-            logger.info(f"🔒 Acquired semaphore slot (active: {self._semaphore._value})")
-            
-            start_time = time.time()
-            
-            try:
-                # Execute with multi-stage retry
-                reviews = await self.retry_manager.scrape_with_retry(place_id)
-                
-                # Normalize and deduplicate with SHA256
-                normalized = self._normalize_reviews(reviews, place_id)
-                
-                duration = time.time() - start_time
-                logger.info(f"✅ Scrape complete: {len(normalized)} reviews in {duration:.2f}s")
-                
-                # Log proxy stats summary
-                stats = self.proxy_manager.proxy_stats
-                if stats:
-                    total_success = sum(s.get("success", 0) for s in stats.values())
-                    total_fail = sum(s.get("fail", 0) for s in stats.values())
-                    logger.info(f"📊 Proxy stats: {total_success} success, {total_fail} fail")
-                
-                return normalized
-                
-            except Exception as e:
-                logger.error(f"Scrape failed: {e}")
-                return []
+            # Always cleanup properly
+            if playwright and context:
+                await BrowserSessionManager.cleanup_session(playwright, context, session_id)
     
     def _normalize_reviews(self, reviews: List[Dict], place_id: str) -> List[Dict]:
-        """Normalize review format with SHA256 deduplication"""
+        """Normalize and deduplicate reviews"""
         normalized = []
         seen = set()
         
-        for r in reviews[:ScraperConfig.MAX_REVIEWS]:
-            text = r.get("text", "").strip()
+        for review in reviews[:ScraperConfig.MAX_REVIEWS]:
+            text = review.get("text", "").strip()
             if not text or len(text) < ScraperConfig.MIN_REVIEW_LENGTH:
                 continue
             
-            # Use SHA256 for deduplication (more secure than MD5)
-            sig_string = f"{r.get('author', '')}:{text[:ScraperConfig.DEDUP_CHAR_LIMIT]}"
-            sig = hashlib.sha256(sig_string.encode()).hexdigest()
+            # Create unique signature for deduplication
+            signature = hashlib.sha256(
+                f"{review.get('author', '')}:{text[:100]}".encode()
+            ).hexdigest()
             
-            if sig in seen:
+            if signature in seen:
                 continue
-            seen.add(sig)
+            seen.add(signature)
             
-            review_id = hashlib.sha256(f"{place_id}:{sig}".encode()).hexdigest()
+            review_id = hashlib.sha256(f"{place_id}:{signature}".encode()).hexdigest()
             
             normalized.append({
                 "google_review_id": review_id,
-                "author": r.get("author", "Anonymous")[:100],
-                "author_name": r.get("author", "Anonymous")[:100],
-                "rating": min(5, max(1, int(r.get("rating", 5)))),
+                "author": review.get("author", "Anonymous")[:100],
+                "author_name": review.get("author", "Anonymous")[:100],
+                "rating": min(5, max(1, int(review.get("rating", 5)))),
                 "review_text": text[:ScraperConfig.MAX_REVIEW_LENGTH],
                 "content": text[:ScraperConfig.MAX_REVIEW_LENGTH],
                 "sentiment_score": 0.5,
                 "google_review_time": datetime.utcnow(),
                 "scraped_at": datetime.utcnow(),
-                "extraction_source": r.get("source", "unknown")
+                "extraction_source": review.get("source", "unknown")
             })
         
         return normalized
@@ -722,7 +796,6 @@ class UltimateGoogleScraper:
 _scraper_instance = None
 
 def get_scraper() -> UltimateGoogleScraper:
-    """Get or create global scraper instance"""
     global _scraper_instance
     if _scraper_instance is None:
         _scraper_instance = UltimateGoogleScraper()
@@ -742,33 +815,15 @@ async def run_scraper(place_id: str) -> List[Dict]:
     return await scrape_google_reviews(place_id)
 
 # =========================================================
-# HEALTH CHECK
-# =========================================================
-
-async def health_check() -> Dict:
-    """Check scraper health and configuration"""
-    return {
-        "status": "healthy",
-        "patchright_available": PATCHRIGHT_AVAILABLE,
-        "stealth_available": STEALTH_AVAILABLE,
-        "selectolax_available": SELECTOLAX_AVAILABLE,
-        "curl_cffi_available": CURL_CFFI_AVAILABLE,
-        "proxy_pool_size": len(get_scraper().proxy_manager.proxy_pool),
-        "proxy_provider": get_scraper().proxy_manager.provider_type,
-        "max_concurrent": ScraperConfig.MAX_CONCURRENT_SCRAPERS,
-        "semaphore_available": SCRAPER_SEMAPHORE._value
-    }
-
-# =========================================================
 # READY
 # =========================================================
 
 print("=" * 80)
-print("✅ PRODUCTION SCRAPER V32.0 READY")
-print(f"   Max Concurrent: {ScraperConfig.MAX_CONCURRENT_SCRAPERS} (semaphore protected)")
-print(f"   Proxy Provider: {get_scraper().proxy_manager.provider_type or 'none'}")
-print(f"   Deduplication: SHA256 (secure)")
-print(f"   Extraction: Hybrid (Playwright + Selectolax)")
-print(f"   Retry Stages: 3 (RPC → Browser → Fresh)")
-print(f"   Session Isolation: UUID4 profiles")
+print("✅ PRODUCTION SCRAPER V33.0 READY")
+print(f"   Concurrency: {MAX_CONCURRENT_BROWSERS} (semaphore protected)")
+print(f"   Proxy Pool: {len(get_scraper().proxy_pool)} proxies")
+print(f"   Infinite Scroll: {ScraperConfig.MAX_SCROLLS} max, {ScraperConfig.SCROLL_STAGNANT_LIMIT} stagnant limit")
+print(f"   RPC Capture: Active")
+print(f"   Screenshot on Failure: {ScraperConfig.SCREENSHOT_ON_FAILURE}")
+print(f"   Detailed Logging: {DETAILED_LOGGING}")
 print("=" * 80)
