@@ -587,19 +587,16 @@
         }
 
         // Page Load
-        // Updated logout function: call logout endpoint then redirect
+        // Updated logout function: call correct logout endpoint and always redirect
         document.getElementById('logoutBtn').addEventListener('click', async function () {
             try {
-                const response = await fetch('/logout', { method: 'POST' });
-                if (response.ok) {
-                    window.location.href = '/';
-                } else {
-                    alert('Logout failed. Please try again.');
-                }
+                // Attempt to call the backend logout endpoint
+                await fetch('/api/auth/logout', { method: 'POST' });
             } catch (err) {
                 console.error('Logout error:', err);
-                alert('An error occurred during logout.');
             }
+            // Always redirect to home page
+            window.location.href = '/';
         });
 
         window.onload = function () {
