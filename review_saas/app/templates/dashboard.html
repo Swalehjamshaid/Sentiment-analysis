@@ -587,8 +587,19 @@
         }
 
         // Page Load
-        document.getElementById('logoutBtn').addEventListener('click', function () {
-            window.location.href = '/';
+        // Updated logout function: call logout endpoint then redirect
+        document.getElementById('logoutBtn').addEventListener('click', async function () {
+            try {
+                const response = await fetch('/logout', { method: 'POST' });
+                if (response.ok) {
+                    window.location.href = '/';
+                } else {
+                    alert('Logout failed. Please try again.');
+                }
+            } catch (err) {
+                console.error('Logout error:', err);
+                alert('An error occurred during logout.');
+            }
         });
 
         window.onload = function () {
